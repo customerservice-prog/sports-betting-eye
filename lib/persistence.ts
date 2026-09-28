@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from "pg";
 import { createInitialPaperState, runExplorationBatch } from "./engine";
 import { PaperState } from "./types";
+import { applyEloResult, predictEloGame, type EloState } from "./modeling/elo";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -342,4 +343,94 @@ export async function listLiveGames(input?: { pastHours?: number; futureHours?: 
     awayScore: row.away_score === null ? null : Number(row.away_score),
     sourceUpdatedAt: new Date(row.source_updated_at).toISOString()
   }));
+}
+
+export type HistoricalBackfillState = {
+  cursorEnd: string;
+  targetStart: string;
+  complete: boolean;
+  chunksCompleted: number;
+  gamesStored: number;
+  updatedAt: string;
+};
+
+export async function getHistoricalBackfillState(): Promise<HistoricalBackfillState | null> {
+  const db = pool();
+  if (!db) return null;
+  await ensureSchema();
+  const result = await db.query<{ payload: HistoricalBackfillState }>(
+    "SELECT payload FROM sports_eye_state WHERE id = $1",
+    ["historical_backfill"]
+  );
+  return result.rows[0]?.payload ?? null;
+}
+
+export async function saveHistoricalBackfillState(state: HistoricalBackfillState) {
+  const db = pool();
+  if (!db) return;
+  await ensureSchema();
+  await db.query(
+    `INSERT INTO sports_eye_state (id, payload, updated_at)
+     VALUES ('historical_backfill', $1::jsonb, NOW())
+     ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+    [JSON.stringify(state)]
+  );
+}
+
+async function eloStateByLeague() {
+  const db = pool();
+  const empty = new Map<string, { state: EloState; sampleSize: number }>();
+  if (!db) return empty;
+  await ensureSchema();
+
+  const result = await db.query(
+    `SELECT league, home_team, away_team, home_score, away_score, starts_at
+     FROM games
+     WHERE status = 'final'
+       AND home_score IS NOT NULL
+       AND away_score IS NOT NULL
+       AND starts_at < NOW()
+     ORDER BY starts_at ASC`
+  );
+
+  const byLeague = empty;
+  for (const row of result.rows) {
+    const current = byLeague.get(row.league) ?? { state: {}, sampleSize: 0 };
+    current.state = applyEloResult(current.state, {
+      homeTeam: row.home_team,
+      awayTeam: row.away_team,
+      homeWon: Number(row.home_score) > Number(row.away_score)
+    });
+    current.sampleSize += 1;
+    byLeague.set(row.league, current);
+  }
+  return byLeague;
+}
+
+export async function listLiveGamesWithBaseline(input?: { pastHours?: number; futureHours?: number; limit?: number }) {
+  const games = await listLiveGames(input);
+  const [elo, backfill] = await Promise.all([eloStateByLeague(), getHistoricalBackfillState()]);
+
+  return games.map((game: any) => {
+    if (game.status !== "scheduled" || new Date(game.startsAt).getTime() <= Date.now()) {
+      return { ...game, baseline: null };
+    }
+
+    const league = elo.get(game.league);
+    if (!league || league.sampleSize < 10) {
+      return { ...game, baseline: null };
+    }
+
+    const prediction = predictEloGame(league.state, game.homeTeam, game.awayTeam);
+    return {
+      ...game,
+      baseline: {
+        model: "Elo real-games baseline",
+        homeWin: Math.round(prediction.homeWinProbability * 1000) / 10,
+        awayWin: Math.round((1 - prediction.homeWinProbability) * 1000) / 10,
+        sampleSize: league.sampleSize,
+        historyComplete: Boolean(backfill?.complete)
+      }
+    };
+  });
 }

@@ -1,5 +1,5 @@
 import { runPersistentExplorationBatch } from "../lib/persistence";
-import { ingestCurrentSportsData } from "../lib/ingestion";
+import { backfillHistoricalChunk, ingestCurrentSportsData } from "../lib/ingestion";
 
 async function main() {
   const ingestion = await ingestCurrentSportsData().catch((error) => ({
@@ -8,6 +8,16 @@ async function main() {
     byLeague: {},
     errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Ingestion failed" }],
     completedAt: new Date().toISOString()
+  }));
+
+  const backfill = await backfillHistoricalChunk(
+    Math.max(1, Number(process.env.HISTORICAL_BACKFILL_DAYS_PER_RUN || 7))
+  ).catch((error) => ({
+    complete: false,
+    chunksCompleted: 0,
+    gamesStored: 0,
+    gamesAdded: 0,
+    errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Backfill failed" }]
   }));
 
   const batchSize = Math.max(1, Number(process.env.EXPLORATION_BATCH_SIZE || 5000));
@@ -24,6 +34,11 @@ async function main() {
     mode: "real-schedule-ingestion-plus-synthetic-paper-exploration",
     realGamesIngested: ingestion.totalGames,
     ingestionErrors: ingestion.errors.length,
+    historicalGamesAdded: backfill.gamesAdded,
+    historicalGamesStored: backfill.gamesStored,
+    historicalBackfillChunks: backfill.chunksCompleted,
+    historicalBackfillComplete: backfill.complete,
+    historicalBackfillErrors: backfill.errors.length,
     batches,
     batchSize,
     decisionsAdded: batches * batchSize,

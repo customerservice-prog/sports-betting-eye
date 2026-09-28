@@ -18,6 +18,13 @@ type LiveGame = {
   statusDetail: string;
   homeScore: number | null;
   awayScore: number | null;
+  baseline: null | {
+    model: string;
+    homeWin: number;
+    awayWin: number;
+    sampleSize: number;
+    historyComplete: boolean;
+  };
 };
 
 function localStart(iso: string) {
@@ -102,7 +109,21 @@ export default function LiveGamesPanel({ compact = false }: { compact?: boolean 
               <span>{game.statusDetail || localStart(game.startsAt)}</span>
               {game.venue && <span>{game.venue}</span>}
             </div>
-            <div className="model-pending">MODEL: PENDING REAL TRAINING</div>
+            {game.baseline ? (
+              <div className="real-baseline">
+                <span>REAL ELO BASELINE • RESEARCH ONLY</span>
+                <div>
+                  <b>{game.awayAbbreviation} {game.baseline.awayWin.toFixed(1)}%</b>
+                  <b>{game.homeAbbreviation} {game.baseline.homeWin.toFixed(1)}%</b>
+                </div>
+                <small>
+                  {game.baseline.sampleSize.toLocaleString()} completed games •
+                  {game.baseline.historyComplete ? " historical backfill complete" : " history still backfilling"}
+                </small>
+              </div>
+            ) : (
+              <div className="model-pending">BASELINE: WAITING FOR ENOUGH COMPLETED REAL GAMES</div>
+            )}
           </article>
         ))}
       </div>

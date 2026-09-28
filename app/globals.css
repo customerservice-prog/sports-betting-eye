@@ -1364,3 +1364,32 @@ button { color: inherit; }
   .real-game-grid { grid-template-columns: 1fr; }
   .proof-source-warning { margin-left: 0; width: 100%; }
 }
+
+.real-baseline {
+  margin-top: 9px;
+  padding: 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(82,213,255,.12);
+  background: rgba(82,213,255,.035);
+}
+.real-baseline > span {
+  display: block;
+  color: var(--cyan);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  margin-bottom: 6px;
+}
+.real-baseline > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.real-baseline b { font-size: 10px; }
+.real-baseline small {
+  display: block;
+  color: var(--muted-2);
+  font-size: 7px;
+  margin-top: 5px;
+  line-height: 1.4;
+}

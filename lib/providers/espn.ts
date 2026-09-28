@@ -7,7 +7,7 @@ const ROUTES: Record<League, { sport: string; league: string; params?: Record<st
   MLB: { sport: "baseball", league: "mlb" },
   NHL: { sport: "hockey", league: "nhl" },
   NCAAF: { sport: "football", league: "college-football", params: { groups: "80", limit: "500" } },
-  NCAAB: { sport: "basketball", league: "mens-college-basketball", params: { limit: "500" } }
+  NCAAB: { sport: "basketball", league: "mens-college-basketball", params: { limit: "1000" } }
 };
 
 type Competitor = {
@@ -33,8 +33,19 @@ export class ESPNPublicProvider {
   readonly name = "espn-public";
 
   async getCurrentScoreboard(league: League): Promise<FeedGame[]> {
+    return this.fetchScoreboard(league);
+  }
+
+  async getRange(league: League, from: Date, to: Date): Promise<FeedGame[]> {
+    const format = (date: Date) =>
+      `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}`;
+    return this.fetchScoreboard(league, `${format(from)}-${format(to)}`);
+  }
+
+  private async fetchScoreboard(league: League, dates?: string): Promise<FeedGame[]> {
     const route = ROUTES[league];
     const params = new URLSearchParams(route.params ?? {});
+    if (dates) params.set("dates", dates);
     const query = params.toString();
     const url =
       `https://site.api.espn.com/apis/site/v2/sports/${route.sport}/${route.league}/scoreboard` +
