@@ -434,3 +434,133 @@ export async function listLiveGamesWithBaseline(input?: { pastHours?: number; fu
     };
   });
 }
+
+
+export async function generateScheduledBaselinePredictions(limit = 250) {
+  const db = pool();
+  if (!db) return { created: 0, skipped: 0 };
+  await ensureSchema();
+
+  const elo = await eloStateByLeague();
+  const games = await db.query(
+    `SELECT id, league, starts_at, home_team, away_team
+     FROM games
+     WHERE status = 'scheduled'
+       AND starts_at > NOW()
+       AND starts_at <= NOW() + INTERVAL '7 days'
+     ORDER BY starts_at ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(1000, limit))]
+  );
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const row of games.rows) {
+    const league = elo.get(row.league);
+    if (!league || league.sampleSize < 10) {
+      skipped += 1;
+      continue;
+    }
+
+    const prediction = predictEloGame(league.state, row.home_team, row.away_team);
+    const probability = prediction.homeWinProbability;
+    const confidence = Math.abs(probability - 0.5);
+    const pickStatus = confidence >= 0.16 ? "PROOF PICK" : confidence >= 0.08 ? "EXPERIMENT" : "NO PICK";
+
+    const result = await db.query(
+      `INSERT INTO predictions (
+        game_id, model_name, model_version, as_of,
+        home_win_probability, uncertainty, pick_status, features
+      )
+      VALUES ($1, 'elo-real-games', 'v1', NOW(), $2, $3, $4, $5::jsonb)
+      ON CONFLICT DO NOTHING
+      RETURNING id`,
+      [
+        row.id,
+        probability,
+        Math.max(0.05, 0.5 - confidence),
+        pickStatus,
+        JSON.stringify({
+          leagueSampleSize: league.sampleSize,
+          homeRating: prediction.homeRating,
+          awayRating: prediction.awayRating,
+          generatedFrom: "real historical final games"
+        })
+      ]
+    );
+
+    if (result.rowCount) created += 1;
+    else skipped += 1;
+  }
+
+  return { created, skipped };
+}
+
+export async function gradeCompletedPredictions(limit = 500) {
+  const db = pool();
+  if (!db) return { graded: 0, mistakesCreated: 0 };
+  await ensureSchema();
+
+  const rows = await db.query(
+    `SELECT
+       p.id AS prediction_id,
+       p.home_win_probability,
+       p.pick_status,
+       g.home_score,
+       g.away_score
+     FROM predictions p
+     JOIN games g ON g.id = p.game_id
+     LEFT JOIN prediction_grades pg ON pg.prediction_id = p.id
+     WHERE pg.id IS NULL
+       AND g.status = 'final'
+       AND g.home_score IS NOT NULL
+       AND g.away_score IS NOT NULL
+     ORDER BY g.starts_at ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(5000, limit))]
+  );
+
+  let graded = 0;
+  let mistakesCreated = 0;
+
+  for (const row of rows.rows) {
+    const p = Math.min(1 - 1e-12, Math.max(1e-12, Number(row.home_win_probability)));
+    const homeWon = Number(row.home_score) > Number(row.away_score);
+    const outcome = homeWon ? 1 : 0;
+    const brier = Math.pow(p - outcome, 2);
+    const logLoss = -(outcome * Math.log(p) + (1 - outcome) * Math.log(1 - p));
+
+    await db.query(
+      `INSERT INTO prediction_grades (prediction_id, home_won, brier, log_loss)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (prediction_id) DO NOTHING`,
+      [row.prediction_id, homeWon, brier, logLoss]
+    );
+    graded += 1;
+
+    const predictedHome = p >= 0.5;
+    const wasWrong = predictedHome !== homeWon;
+    const confidence = Math.max(p, 1 - p);
+
+    if (wasWrong && confidence >= 0.65) {
+      const severity = confidence >= 0.8 ? "Critical" : confidence >= 0.7 ? "High" : "Medium";
+      const inserted = await db.query(
+        `INSERT INTO mistake_cases (prediction_id, severity, root_cause, lesson, tags)
+         SELECT $1,$2,$3,$4,$5::jsonb
+         WHERE NOT EXISTS (SELECT 1 FROM mistake_cases WHERE prediction_id = $1)
+         RETURNING id`,
+        [
+          row.prediction_id,
+          severity,
+          "High-confidence baseline prediction missed the final outcome; deeper feature attribution required.",
+          "Replay this game during challenger training and inspect injuries, matchup context, rest, and market disagreement.",
+          JSON.stringify(["high-confidence", "wrong-pick", "auto-generated"])
+        ]
+      );
+      if (inserted.rowCount) mistakesCreated += 1;
+    }
+  }
+
+  return { graded, mistakesCreated };
+}
