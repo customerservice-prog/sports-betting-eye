@@ -23,7 +23,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { demoGames, mistakeCases, modelCards, proofMetrics } from "@/lib/seed-data";
 import {
   createInitialPaperState,
@@ -659,15 +659,39 @@ export default function SportsEyeApp() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("sports-eye-paper-v1");
-    if (saved) {
+    let cancelled = false;
+
+    async function hydrate() {
+      const saved = window.localStorage.getItem("sports-eye-paper-v1");
+      let localState: PaperState | null = null;
+
+      if (saved) {
+        try {
+          localState = JSON.parse(saved);
+        } catch {
+          localState = null;
+        }
+      }
+
       try {
-        setPaper(JSON.parse(saved));
+        const response = await fetch("/api/state", { cache: "no-store" });
+        const payload = await response.json();
+        if (!cancelled && response.ok && payload.state) {
+          setPaper(payload.state);
+        } else if (!cancelled && localState) {
+          setPaper(localState);
+        }
       } catch {
-        setPaper(createInitialPaperState());
+        if (!cancelled && localState) setPaper(localState);
+      } finally {
+        if (!cancelled) setHydrated(true);
       }
     }
-    setHydrated(true);
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -676,25 +700,60 @@ export default function SportsEyeApp() {
     }
   }, [paper, hydrated]);
 
+  const runBatchRequest = useCallback(async (batchSize = 250) => {
+    try {
+      const response = await fetch("/api/explore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchSize })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.state) throw new Error(payload.error || "Batch failed");
+      setPaper(payload.state);
+      return payload.state as PaperState;
+    } catch {
+      setPaper((current) => runExplorationBatch(current, batchSize));
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!autoLearning) return;
-    const timer = window.setInterval(() => {
-      setPaper((current) => runExplorationBatch(current, 250));
-    }, 1400);
-    return () => window.clearInterval(timer);
-  }, [autoLearning]);
+    let active = true;
+    let running = false;
+
+    const tick = async () => {
+      if (!active || running) return;
+      running = true;
+      await runBatchRequest(250);
+      running = false;
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [autoLearning, runBatchRequest]);
 
   const activeLabel = useMemo(() => navItems.find((item) => item.key === view)?.label ?? "Sports Eye", [view]);
 
   const runBatch = () => {
     setIsRunning(true);
-    window.setTimeout(() => {
-      setPaper((current) => runExplorationBatch(current, 250));
-      setIsRunning(false);
-    }, 550);
+    void runBatchRequest(250).finally(() => setIsRunning(false));
   };
 
-  const reset = () => setPaper(resetPaperState());
+  const reset = () => {
+    void fetch("/api/state", { method: "DELETE" })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (payload.state) setPaper(payload.state);
+        else setPaper(resetPaperState());
+      })
+      .catch(() => setPaper(resetPaperState()));
+  };
 
   const chooseView = (next: View) => {
     setView(next);
