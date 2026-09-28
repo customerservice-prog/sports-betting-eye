@@ -1327,3 +1327,40 @@ button { color: inherit; }
   .model-vote { grid-template-columns: 92px 1fr; }
   .model-vote b { grid-column: 2; }
 }
+
+.real-games-panel { margin: 16px 0; }
+.feed-refresh {
+  border: 1px solid var(--line); background: rgba(255,255,255,.025); color: var(--muted);
+  border-radius: 8px; min-height: 32px; padding: 0 10px; display: inline-flex;
+  align-items: center; gap: 7px; cursor: pointer; font-size: 9px; font-weight: 800;
+}
+.feed-refresh:hover { color: var(--text); border-color: rgba(255,255,255,.14); }
+.feed-refresh:disabled { opacity: .55; cursor: wait; }
+.source-disclaimer {
+  min-height: 38px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 9px 11px; margin: -4px 0 13px; border: 1px solid rgba(82,213,255,.11);
+  background: rgba(82,213,255,.035); border-radius: 10px; color: var(--cyan); font-size: 9px;
+}
+.proof-source-warning { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--yellow); }
+.real-game-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; }
+.real-game-card { border: 1px solid var(--line); background: rgba(255,255,255,.018); border-radius: 13px; padding: 13px; min-width: 0; }
+.real-game-card.live { border-color: rgba(101,232,164,.24); box-shadow: inset 0 0 30px rgba(101,232,164,.025); }
+.real-game-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.feed-status { font-size: 8px; font-weight: 900; letter-spacing: .07em; color: var(--muted); }
+.feed-status.live { color: var(--green); }
+.feed-status.final { color: var(--muted); }
+.feed-status.scheduled { color: var(--cyan); }
+.real-team-row { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 8px; min-height: 43px; }
+.real-team-row strong { display: block; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.real-team-row small { display: block; color: var(--muted-2); font-size: 8px; margin-top: 2px; }
+.real-team-row b { font-size: 16px; letter-spacing: -.03em; }
+.real-game-meta { display: grid; gap: 3px; padding-top: 9px; margin-top: 5px; border-top: 1px solid var(--line); color: var(--muted-2); font-size: 8px; }
+.model-pending { margin-top: 9px; color: var(--yellow); font-size: 7px; font-weight: 900; letter-spacing: .07em; }
+.feed-error { padding: 14px; border-radius: 10px; background: rgba(255,108,130,.06); border: 1px solid rgba(255,108,130,.14); color: var(--red); font-size: 10px; }
+.feed-more { text-align: center; color: var(--muted-2); font-size: 8px; margin-top: 11px; }
+@media (max-width: 1250px) { .real-game-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 900px) { .real-game-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 560px) {
+  .real-game-grid { grid-template-columns: 1fr; }
+  .proof-source-warning { margin-left: 0; width: 100%; }
+}

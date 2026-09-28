@@ -236,3 +236,110 @@ export async function getSystemStats() {
     paper
   };
 }
+
+export type FeedGame = {
+  providerGameId: string;
+  league: string;
+  startsAt: string;
+  homeTeam: string;
+  awayTeam: string;
+  status: "scheduled" | "live" | "final";
+  homeScore?: number;
+  awayScore?: number;
+  sourceUpdatedAt: string;
+  homeAbbreviation?: string;
+  awayAbbreviation?: string;
+  homeRecord?: string;
+  awayRecord?: string;
+  venue?: string;
+  statusDetail?: string;
+  raw?: Record<string, unknown>;
+};
+
+export async function upsertProviderGames(provider: string, games: FeedGame[]) {
+  const db = pool();
+  if (!db) return 0;
+  await ensureSchema();
+
+  let count = 0;
+  for (const game of games) {
+    const id = `${provider}:${game.league}:${game.providerGameId}`;
+    const raw = {
+      ...(game.raw ?? {}),
+      homeAbbreviation: game.homeAbbreviation ?? "",
+      awayAbbreviation: game.awayAbbreviation ?? "",
+      homeRecord: game.homeRecord ?? "",
+      awayRecord: game.awayRecord ?? "",
+      venue: game.venue ?? "",
+      statusDetail: game.statusDetail ?? ""
+    };
+
+    await db.query(
+      `INSERT INTO games (
+        id, provider, provider_game_id, league, starts_at, home_team, away_team,
+        status, home_score, away_score, source_updated_at, raw
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+      ON CONFLICT (provider, provider_game_id) DO UPDATE SET
+        league = EXCLUDED.league,
+        starts_at = EXCLUDED.starts_at,
+        home_team = EXCLUDED.home_team,
+        away_team = EXCLUDED.away_team,
+        status = EXCLUDED.status,
+        home_score = EXCLUDED.home_score,
+        away_score = EXCLUDED.away_score,
+        source_updated_at = EXCLUDED.source_updated_at,
+        raw = EXCLUDED.raw`,
+      [
+        id, provider, game.providerGameId, game.league, game.startsAt,
+        game.homeTeam, game.awayTeam, game.status,
+        game.homeScore ?? null, game.awayScore ?? null,
+        game.sourceUpdatedAt, JSON.stringify(raw)
+      ]
+    );
+    count += 1;
+  }
+  return count;
+}
+
+export async function listLiveGames(input?: { pastHours?: number; futureHours?: number; limit?: number }) {
+  const db = pool();
+  if (!db) return [];
+  await ensureSchema();
+
+  const pastHours = Math.max(1, Math.min(168, input?.pastHours ?? 18));
+  const futureHours = Math.max(1, Math.min(336, input?.futureHours ?? 120));
+  const limit = Math.max(1, Math.min(250, input?.limit ?? 100));
+
+  const result = await db.query(
+    `SELECT id, provider, provider_game_id, league, starts_at, home_team, away_team,
+      status, home_score, away_score, source_updated_at, raw
+     FROM games
+     WHERE starts_at >= NOW() - ($1 * INTERVAL '1 hour')
+       AND starts_at <= NOW() + ($2 * INTERVAL '1 hour')
+     ORDER BY
+       CASE status WHEN 'live' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END,
+       starts_at ASC
+     LIMIT $3`,
+    [pastHours, futureHours, limit]
+  );
+
+  return result.rows.map((row: any) => ({
+    id: row.id,
+    provider: row.provider,
+    providerGameId: row.provider_game_id,
+    league: row.league,
+    startsAt: new Date(row.starts_at).toISOString(),
+    homeTeam: row.home_team,
+    awayTeam: row.away_team,
+    homeAbbreviation: row.raw?.homeAbbreviation ?? row.home_team.slice(0, 3).toUpperCase(),
+    awayAbbreviation: row.raw?.awayAbbreviation ?? row.away_team.slice(0, 3).toUpperCase(),
+    homeRecord: row.raw?.homeRecord ?? "",
+    awayRecord: row.raw?.awayRecord ?? "",
+    venue: row.raw?.venue ?? "",
+    status: row.status,
+    statusDetail: row.raw?.statusDetail ?? "",
+    homeScore: row.home_score === null ? null : Number(row.home_score),
+    awayScore: row.away_score === null ? null : Number(row.away_score),
+    sourceUpdatedAt: new Date(row.source_updated_at).toISOString()
+  }));
+}

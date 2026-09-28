@@ -32,6 +32,7 @@ import {
   runExplorationBatch
 } from "@/lib/engine";
 import { GamePrediction, League, PaperState } from "@/lib/types";
+import LiveGamesPanel from "@/components/LiveGamesPanel";
 
 type View = "overview" | "games" | "brain" | "bankroll" | "models" | "mistakes" | "proof";
 
@@ -252,11 +253,11 @@ function Overview({
         <section className="brain-status-card">
           <div className="brain-orb"><BrainCircuit size={34} /></div>
           <span className="live-label"><span className="pulse-dot" /> ENGINE READY</span>
-          <strong>Sports Brain v0.1</strong>
-          <p>Starter simulation engine is active. External live-data providers are not connected yet.</p>
+          <strong>Sports Brain v0.3</strong>
+          <p>Real schedules/results are ingesting to PostgreSQL while prediction experimentation remains isolated and synthetic.</p>
           <div className="brain-metrics">
-            <div><span>Mode</span><b>Simulation</b></div>
-            <div><span>Data</span><b>Demo</b></div>
+            <div><span>Mode</span><b>Learning</b></div>
+            <div><span>Data</span><b>Real + Demo</b></div>
             <div><span>Proof</span><b>Locked</b></div>
           </div>
         </section>
@@ -292,6 +293,8 @@ function Overview({
           accent="orange"
         />
       </section>
+
+      <LiveGamesPanel compact />
 
       <div className="content-grid">
         <section className="panel slate-panel">
@@ -383,6 +386,8 @@ function GamesView({
           ))}
         </div>
       </div>
+
+      <LiveGamesPanel />
 
       <div className="game-browser-grid">
         <div className="game-list tall-list">
@@ -778,8 +783,8 @@ export default function SportsEyeApp() {
         </nav>
         <div className="sidebar-foot">
           <div className="system-chip"><span className="pulse-dot" /> Engine online</div>
-          <p>Simulation build v0.1</p>
-          <p>No live provider connected</p>
+          <p>Sports Brain v0.3</p>
+          <p>Real schedules connected</p>
         </div>
       </aside>
 
@@ -793,7 +798,7 @@ export default function SportsEyeApp() {
           </div>
           <div className="topbar-data-warning">
             <Database size={15} />
-            <span>Demo data mode</span>
+            <span>Real games + synthetic modeling</span>
           </div>
           <div className="topbar-right">
             <span className="proof-lock"><LockKeyhole size={15} /> Proof locked</span>
