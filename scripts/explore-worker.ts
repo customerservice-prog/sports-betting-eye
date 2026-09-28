@@ -1,4 +1,4 @@
-import { runPersistentExplorationBatch } from "../lib/persistence";
+import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
 import { backfillHistoricalChunk, ingestCurrentSportsData } from "../lib/ingestion";
 
 async function main() {
@@ -20,6 +20,18 @@ async function main() {
     errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Backfill failed" }]
   }));
 
+  const predictionGeneration = await generateScheduledBaselinePredictions(500).catch((error) => ({
+    created: 0,
+    skipped: 0,
+    error: error instanceof Error ? error.message : "Prediction generation failed"
+  }));
+
+  const grading = await gradeCompletedPredictions(1000).catch((error) => ({
+    graded: 0,
+    mistakesCreated: 0,
+    error: error instanceof Error ? error.message : "Prediction grading failed"
+  }));
+
   const batchSize = Math.max(1, Number(process.env.EXPLORATION_BATCH_SIZE || 5000));
   const batches = Math.max(1, Number(process.env.EXPLORATION_BATCHES_PER_RUN || 20));
 
@@ -39,6 +51,10 @@ async function main() {
     historicalBackfillChunks: backfill.chunksCompleted,
     historicalBackfillComplete: backfill.complete,
     historicalBackfillErrors: backfill.errors.length,
+    realPredictionsCreated: predictionGeneration.created,
+    realPredictionsSkipped: predictionGeneration.skipped,
+    predictionsGraded: grading.graded,
+    mistakesCreated: grading.mistakesCreated,
     batches,
     batchSize,
     decisionsAdded: batches * batchSize,
