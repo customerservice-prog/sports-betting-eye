@@ -209,13 +209,17 @@ function Overview({
   selectedGame,
   onSelectGame,
   onRunBatch,
-  isRunning
+  isRunning,
+  autoLearning,
+  onToggleAuto
 }: {
   paper: PaperState;
   selectedGame: GamePrediction;
   onSelectGame: (game: GamePrediction) => void;
   onRunBatch: () => void;
   isRunning: boolean;
+  autoLearning: boolean;
+  onToggleAuto: () => void;
 }) {
   const totalResults = paper.wins + paper.losses;
   const winRate = totalResults ? (paper.wins / totalResults) * 100 : 0;
@@ -236,6 +240,10 @@ function Overview({
             <button className="primary-button" onClick={onRunBatch} disabled={isRunning}>
               {isRunning ? <RefreshCw size={17} className="spin" /> : <Play size={17} />}
               {isRunning ? "Running batch…" : "Run 250 paper trials"}
+            </button>
+            <button className={`ghost-button auto-button ${autoLearning ? "auto-active" : ""}`} onClick={onToggleAuto}>
+              <Zap size={16} />
+              {autoLearning ? "Auto exploration ON" : "Start auto exploration"}
             </button>
             <span className="simulation-only"><LockKeyhole size={15} /> Real-money execution locked</span>
           </div>
@@ -647,6 +655,7 @@ export default function SportsEyeApp() {
   const [paper, setPaper] = useState<PaperState>(() => createInitialPaperState());
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [autoLearning, setAutoLearning] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -666,6 +675,14 @@ export default function SportsEyeApp() {
       window.localStorage.setItem("sports-eye-paper-v1", JSON.stringify(paper));
     }
   }, [paper, hydrated]);
+
+  useEffect(() => {
+    if (!autoLearning) return;
+    const timer = window.setInterval(() => {
+      setPaper((current) => runExplorationBatch(current, 250));
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [autoLearning]);
 
   const activeLabel = useMemo(() => navItems.find((item) => item.key === view)?.label ?? "Sports Eye", [view]);
 
@@ -727,7 +744,15 @@ export default function SportsEyeApp() {
 
         <div className="page">
           {view === "overview" && (
-            <Overview paper={paper} selectedGame={selectedGame} onSelectGame={setSelectedGame} onRunBatch={runBatch} isRunning={isRunning} />
+            <Overview
+              paper={paper}
+              selectedGame={selectedGame}
+              onSelectGame={setSelectedGame}
+              onRunBatch={runBatch}
+              isRunning={isRunning}
+              autoLearning={autoLearning}
+              onToggleAuto={() => setAutoLearning((value) => !value)}
+            />
           )}
           {view === "games" && <GamesView selectedGame={selectedGame} onSelectGame={setSelectedGame} />}
           {view === "brain" && <BrainView />}
