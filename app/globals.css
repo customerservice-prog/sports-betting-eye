@@ -294,9 +294,17 @@ button { color: inherit; }
 .hero-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  flex-wrap: wrap;
   position: relative;
   z-index: 1;
+}
+
+.auto-button.auto-active {
+  color: var(--green);
+  border-color: rgba(101,232,164,.22);
+  background: rgba(101,232,164,.06);
+  box-shadow: inset 0 0 18px rgba(101,232,164,.025);
 }
 
 .primary-button,
@@ -1264,7 +1272,8 @@ button { color: inherit; }
   .hero-panel { padding: 24px 20px; min-height: 350px; }
   .hero-panel h1 { font-size: 39px; }
   .hero-actions { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .primary-button { width: 100%; }
+  .hero-actions .primary-button,
+  .hero-actions .auto-button { width: 100%; }
 
   .stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .stat-card { padding: 14px; }
