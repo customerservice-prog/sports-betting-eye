@@ -327,3 +327,32 @@ export class ESPNReferenceProvider {
     return bundle;
   }
 }
+
+
+export async function fetchESPNGamePackage(league: League, eventId: string) {
+  const route = ROUTES[league];
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${route.sport}/${route.league}/summary?event=${encodeURIComponent(eventId)}`;
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      "user-agent": "SportsEye/0.5 game-package-ingestion"
+    },
+    signal: AbortSignal.timeout(15_000),
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(`ESPN summary request failed for ${league} game ${eventId}: ${response.status}`);
+  }
+  const payload = await response.json() as any;
+  return {
+    summary: {
+      header: payload?.header ?? {},
+      gameInfo: payload?.gameInfo ?? {},
+      winProbability: payload?.winprobability ?? payload?.winProbability ?? []
+    },
+    boxscore: payload?.boxscore ?? {},
+    plays: payload?.plays ?? [],
+    leaders: payload?.leaders ?? payload?.boxscore?.teams?.map?.((team: any) => team?.statistics ?? []) ?? [],
+    raw: payload
+  };
+}
