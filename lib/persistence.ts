@@ -956,6 +956,60 @@ export async function upsertReferenceData(
     transactionCount += 1;
   }
 
+
+  const leagues = new Set<string>([
+    ...(input.teams ?? []).map((item) => item.league),
+    ...(input.players ?? []).map((item) => item.league),
+    ...(input.injuries ?? []).map((item) => item.league),
+    ...(input.transactions ?? []).map((item) => item.league)
+  ]);
+
+  for (const league of leagues) {
+    const leagueInjuries = (input.injuries ?? []).filter((item) => item.league === league);
+    const leagueTransactions = (input.transactions ?? []).filter((item) => item.league === league);
+
+    await db.query(
+      `INSERT INTO league_snapshots (provider, league, snapshot_type, captured_at, payload)
+       VALUES ($1,$2,'injuries',$3,$4::jsonb)
+       ON CONFLICT (provider, league, snapshot_type) DO UPDATE SET
+         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
+      [provider, league, capturedAt, JSON.stringify(leagueInjuries)]
+    );
+
+    await db.query(
+      `INSERT INTO league_snapshots (provider, league, snapshot_type, captured_at, payload)
+       VALUES ($1,$2,'transactions',$3,$4::jsonb)
+       ON CONFLICT (provider, league, snapshot_type) DO UPDATE SET
+         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
+      [provider, league, capturedAt, JSON.stringify(leagueTransactions)]
+    );
+  }
+
+  for (const team of input.teams ?? []) {
+    const teamPlayers = (input.players ?? []).filter(
+      (item) => item.league === team.league && item.teamProviderId === team.providerTeamId
+    );
+    const teamInjuries = (input.injuries ?? []).filter(
+      (item) => item.league === team.league && item.teamProviderId === team.providerTeamId
+    );
+
+    await db.query(
+      `INSERT INTO team_snapshots (provider, league, provider_team_id, snapshot_type, captured_at, payload)
+       VALUES ($1,$2,$3,'roster',$4,$5::jsonb)
+       ON CONFLICT (provider, league, provider_team_id, snapshot_type) DO UPDATE SET
+         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
+      [provider, team.league, team.providerTeamId, capturedAt, JSON.stringify(teamPlayers)]
+    );
+
+    await db.query(
+      `INSERT INTO team_snapshots (provider, league, provider_team_id, snapshot_type, captured_at, payload)
+       VALUES ($1,$2,$3,'injuries',$4,$5::jsonb)
+       ON CONFLICT (provider, league, provider_team_id, snapshot_type) DO UPDATE SET
+         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
+      [provider, team.league, team.providerTeamId, capturedAt, JSON.stringify(teamInjuries)]
+    );
+  }
+
   return { teams: teamCount, players: playerCount, injuries: injuryCount, transactions: transactionCount };
 }
 
