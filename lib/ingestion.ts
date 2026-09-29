@@ -1,5 +1,5 @@
-import { ESPNPublicProvider, sportsEyeLeagues } from "./providers/espn";
-import { upsertProviderGames } from "./persistence";
+import { ESPNPublicProvider, ESPNReferenceProvider, sportsEyeLeagues } from "./providers/espn";
+import { getNamedState, saveNamedState, upsertProviderGames, upsertReferenceData } from "./persistence";
 import { League } from "./types";
 
 export type IngestionResult = {
@@ -68,7 +68,8 @@ export async function backfillHistoricalChunk(daysPerChunk = 7) {
   }
 
   const cursorEnd = existing ? new Date(existing.cursorEnd) : defaultCursor;
-  const targetStart = existing ? new Date(existing.targetStart) : defaultTarget;
+  const storedTarget = existing ? new Date(existing.targetStart) : configuredTarget;
+  const targetStart = storedTarget.getTime() > configuredTarget.getTime() ? configuredTarget : storedTarget;
   const candidateStart = new Date(cursorEnd.getTime() - (Math.max(1, daysPerChunk) - 1) * 24 * 60 * 60 * 1000);
   const chunkStart = candidateStart < targetStart ? targetStart : candidateStart;
 
@@ -112,4 +113,58 @@ export async function backfillHistoricalChunk(daysPerChunk = 7) {
   }
 
   return { ...nextState, gamesAdded, errors };
+}
+
+
+export async function ingestReferenceKnowledge(input?: { force?: boolean; maxLeagues?: number }) {
+  const refreshHours = Math.max(1, Number(process.env.REFERENCE_REFRESH_HOURS || 6));
+  const state = await getNamedState<{ lastCompletedAt?: string }>("reference_ingestion");
+  const last = state?.lastCompletedAt ? new Date(state.lastCompletedAt).getTime() : 0;
+  const due = input?.force || !last || Date.now() - last >= refreshHours * 60 * 60 * 1000;
+
+  if (!due) {
+    return {
+      skipped: true,
+      reason: "refresh-window",
+      lastCompletedAt: state?.lastCompletedAt ?? null,
+      totals: { teams: 0, players: 0, injuries: 0, transactions: 0 },
+      errors: [] as Array<{ league: string; message: string }>
+    };
+  }
+
+  const provider = new ESPNReferenceProvider();
+  const maxLeagues = Math.max(1, Math.min(sportsEyeLeagues.length, input?.maxLeagues ?? sportsEyeLeagues.length));
+  const totals = { teams: 0, players: 0, injuries: 0, transactions: 0 };
+  const errors: Array<{ league: string; message: string }> = [];
+
+  for (const league of sportsEyeLeagues.slice(0, maxLeagues)) {
+    try {
+      const bundle = await provider.getReferenceBundle(league);
+      const stored = await upsertReferenceData(provider.name, {
+        ...bundle,
+        capturedAt: new Date().toISOString()
+      });
+      totals.teams += stored.teams;
+      totals.players += stored.players;
+      totals.injuries += stored.injuries;
+      totals.transactions += stored.transactions;
+    } catch (error) {
+      errors.push({
+        league,
+        message: error instanceof Error ? error.message : "Reference ingestion failed"
+      });
+    }
+  }
+
+  const completedAt = new Date().toISOString();
+  if (errors.length === 0) {
+    await saveNamedState("reference_ingestion", { lastCompletedAt: completedAt, totals });
+  }
+
+  return {
+    skipped: false,
+    completedAt,
+    totals,
+    errors
+  };
 }
