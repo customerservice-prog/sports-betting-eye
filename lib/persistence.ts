@@ -156,140 +156,11 @@ export async function ensureSchema(client?: PoolClient) {
       ('sports-ensemble', 'v1', 'challenger')
     ON CONFLICT (model_name, model_version) DO NOTHING;
 
-
-    CREATE TABLE IF NOT EXISTS teams (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      provider_team_id TEXT NOT NULL,
-      league TEXT NOT NULL,
-      name TEXT NOT NULL,
-      display_name TEXT,
-      abbreviation TEXT,
-      location TEXT,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      source_updated_at TIMESTAMPTZ NOT NULL,
-      UNIQUE(provider, provider_team_id, league)
-    );
-
-    ALTER TABLE teams ADD COLUMN IF NOT EXISTS display_name TEXT;
-
-    CREATE TABLE IF NOT EXISTS players (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      provider_player_id TEXT NOT NULL,
-      league TEXT NOT NULL,
-      full_name TEXT NOT NULL,
-      first_name TEXT,
-      last_name TEXT,
-      position TEXT,
-      jersey TEXT,
-      height TEXT,
-      weight TEXT,
-      age INTEGER,
-      experience TEXT,
-      active BOOLEAN,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      source_updated_at TIMESTAMPTZ NOT NULL,
-      UNIQUE(provider, provider_player_id, league)
-    );
-
-    CREATE TABLE IF NOT EXISTS roster_snapshots (
-      id BIGSERIAL PRIMARY KEY,
-      team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
-      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
-      league TEXT NOT NULL,
-      captured_at TIMESTAMPTZ NOT NULL,
-      starter BOOLEAN,
-      depth_order INTEGER,
-      roster_status TEXT,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-
-    CREATE TABLE IF NOT EXISTS injuries (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      league TEXT NOT NULL,
-      player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
-      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
-      status TEXT,
-      body_part TEXT,
-      detail TEXT,
-      estimated_return_date DATE,
-      captured_at TIMESTAMPTZ NOT NULL,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      league TEXT NOT NULL,
-      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
-      player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
-      transaction_type TEXT,
-      detail TEXT,
-      occurred_at TIMESTAMPTZ,
-      captured_at TIMESTAMPTZ NOT NULL,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-
-    CREATE TABLE IF NOT EXISTS team_snapshots (
-      id BIGSERIAL PRIMARY KEY,
-      provider TEXT NOT NULL,
-      league TEXT NOT NULL,
-      provider_team_id TEXT NOT NULL,
-      snapshot_type TEXT NOT NULL,
-      captured_at TIMESTAMPTZ NOT NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      UNIQUE(provider, league, provider_team_id, snapshot_type)
-    );
-
-    CREATE TABLE IF NOT EXISTS league_snapshots (
-      id BIGSERIAL PRIMARY KEY,
-      provider TEXT NOT NULL,
-      league TEXT NOT NULL,
-      snapshot_type TEXT NOT NULL,
-      captured_at TIMESTAMPTZ NOT NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      UNIQUE(provider, league, snapshot_type)
-    );
-
-    CREATE TABLE IF NOT EXISTS game_context_snapshots (
-      id BIGSERIAL PRIMARY KEY,
-      game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-      captured_at TIMESTAMPTZ NOT NULL,
-      home_rest_days DOUBLE PRECISION,
-      away_rest_days DOUBLE PRECISION,
-      weather JSONB NOT NULL DEFAULT '{}'::jsonb,
-      injuries JSONB NOT NULL DEFAULT '[]'::jsonb,
-      starters JSONB NOT NULL DEFAULT '[]'::jsonb,
-      market JSONB NOT NULL DEFAULT '[]'::jsonb,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-
-    CREATE TABLE IF NOT EXISTS game_packages (
-      game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
-      provider TEXT NOT NULL,
-      captured_at TIMESTAMPTZ NOT NULL,
-      summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-      boxscore JSONB NOT NULL DEFAULT '{}'::jsonb,
-      plays JSONB NOT NULL DEFAULT '[]'::jsonb,
-      leaders JSONB NOT NULL DEFAULT '[]'::jsonb,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-
     CREATE INDEX IF NOT EXISTS idx_games_starts_at ON games(starts_at);
     CREATE INDEX IF NOT EXISTS idx_predictions_game_id ON predictions(game_id);
     CREATE INDEX IF NOT EXISTS idx_feature_snapshots_game_id ON feature_snapshots(game_id);
     CREATE INDEX IF NOT EXISTS idx_model_backtests_model ON model_backtests(model_name, model_version);
     CREATE INDEX IF NOT EXISTS idx_exploration_batches_created_at ON exploration_batches(created_at);
-    CREATE INDEX IF NOT EXISTS idx_players_league_name ON players(league, full_name);
-    CREATE INDEX IF NOT EXISTS idx_roster_snapshots_team_time ON roster_snapshots(team_id, captured_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_injuries_league_time ON injuries(league, captured_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_transactions_league_time ON transactions(league, captured_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_team_snapshots_lookup ON team_snapshots(provider, league, provider_team_id, snapshot_type);
-    CREATE INDEX IF NOT EXISTS idx_league_snapshots_lookup ON league_snapshots(provider, league, snapshot_type);
-    CREATE INDEX IF NOT EXISTS idx_game_context_game_time ON game_context_snapshots(game_id, captured_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_game_packages_captured_at ON game_packages(captured_at DESC);
   `);
 
   return true;
@@ -795,239 +666,28 @@ export async function gradeCompletedPredictions(limit = 500) {
 }
 
 
-export type TeamRecordInput = {
-  providerTeamId: string;
-  league: string;
-  name: string;
-  abbreviation?: string;
-  location?: string;
-  raw?: Record<string, unknown>;
-};
-
-export type PlayerRecordInput = {
-  providerPlayerId: string;
-  league: string;
-  fullName: string;
-  firstName?: string;
-  lastName?: string;
-  position?: string;
-  jersey?: string;
-  height?: string;
-  weight?: string;
-  age?: number;
-  experience?: string;
-  active?: boolean;
-  teamProviderId?: string;
-  starter?: boolean;
-  depthOrder?: number;
-  rosterStatus?: string;
-  raw?: Record<string, unknown>;
-};
-
-export type InjuryRecordInput = {
-  providerInjuryId: string;
-  league: string;
-  playerProviderId?: string;
-  teamProviderId?: string;
-  status?: string;
-  bodyPart?: string;
-  detail?: string;
-  estimatedReturnDate?: string;
-  raw?: Record<string, unknown>;
-};
-
-export type TransactionRecordInput = {
-  providerTransactionId: string;
-  league: string;
-  playerProviderId?: string;
-  teamProviderId?: string;
-  transactionType?: string;
-  detail?: string;
-  occurredAt?: string;
-  raw?: Record<string, unknown>;
-};
-
-function providerEntityId(provider: string, league: string, kind: string, providerId: string) {
-  return `${provider}:${league}:${kind}:${providerId}`;
-}
-
-export async function upsertReferenceData(
-  provider: string,
-  input: {
-    teams?: TeamRecordInput[];
-    players?: PlayerRecordInput[];
-    injuries?: InjuryRecordInput[];
-    transactions?: TransactionRecordInput[];
-    capturedAt?: string;
-  }
-) {
-  const db = pool();
-  if (!db) return { teams: 0, players: 0, injuries: 0, transactions: 0 };
-  await ensureSchema();
-  const capturedAt = input.capturedAt ?? new Date().toISOString();
-
-  let teamCount = 0;
-  let playerCount = 0;
-  let injuryCount = 0;
-  let transactionCount = 0;
-
-  for (const team of input.teams ?? []) {
-    const id = providerEntityId(provider, team.league, "team", team.providerTeamId);
-    await db.query(
-      `INSERT INTO teams (id, provider, provider_team_id, league, name, display_name, abbreviation, location, raw, source_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8::jsonb,$9)
-       ON CONFLICT (provider, provider_team_id, league) DO UPDATE SET
-         name=EXCLUDED.name, display_name=EXCLUDED.display_name, abbreviation=EXCLUDED.abbreviation, location=EXCLUDED.location,
-         raw=EXCLUDED.raw, source_updated_at=EXCLUDED.source_updated_at`,
-      [id, provider, team.providerTeamId, team.league, team.name, team.abbreviation ?? null,
-       team.location ?? null, JSON.stringify(team.raw ?? {}), capturedAt]
-    );
-    teamCount += 1;
-  }
-
-  for (const player of input.players ?? []) {
-    const id = providerEntityId(provider, player.league, "player", player.providerPlayerId);
-    await db.query(
-      `INSERT INTO players (
-        id, provider, provider_player_id, league, full_name, first_name, last_name, position,
-        jersey, height, weight, age, experience, active, raw, source_updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
-      ON CONFLICT (provider, provider_player_id, league) DO UPDATE SET
-        full_name=EXCLUDED.full_name, first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
-        position=EXCLUDED.position, jersey=EXCLUDED.jersey, height=EXCLUDED.height,
-        weight=EXCLUDED.weight, age=EXCLUDED.age, experience=EXCLUDED.experience,
-        active=EXCLUDED.active, raw=EXCLUDED.raw, source_updated_at=EXCLUDED.source_updated_at`,
-      [id, provider, player.providerPlayerId, player.league, player.fullName, player.firstName ?? null,
-       player.lastName ?? null, player.position ?? null, player.jersey ?? null, player.height ?? null,
-       player.weight ?? null, player.age ?? null, player.experience ?? null, player.active ?? null,
-       JSON.stringify(player.raw ?? {}), capturedAt]
-    );
-
-    if (player.teamProviderId) {
-      const teamId = providerEntityId(provider, player.league, "team", player.teamProviderId);
-      await db.query(
-        `INSERT INTO roster_snapshots (
-          team_id, player_id, league, captured_at, starter, depth_order, roster_status, raw
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
-        [teamId, id, player.league, capturedAt, player.starter ?? null, player.depthOrder ?? null,
-         player.rosterStatus ?? null, JSON.stringify(player.raw ?? {})]
-      ).catch(() => undefined);
-    }
-    playerCount += 1;
-  }
-
-  for (const injury of input.injuries ?? []) {
-    const id = providerEntityId(provider, injury.league, "injury", injury.providerInjuryId);
-    const playerId = injury.playerProviderId
-      ? providerEntityId(provider, injury.league, "player", injury.playerProviderId) : null;
-    const teamId = injury.teamProviderId
-      ? providerEntityId(provider, injury.league, "team", injury.teamProviderId) : null;
-    await db.query(
-      `INSERT INTO injuries (
-        id, provider, league, player_id, team_id, status, body_part, detail,
-        estimated_return_date, captured_at, raw
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
-      ON CONFLICT (id) DO UPDATE SET
-        status=EXCLUDED.status, body_part=EXCLUDED.body_part, detail=EXCLUDED.detail,
-        estimated_return_date=EXCLUDED.estimated_return_date, captured_at=EXCLUDED.captured_at,
-        raw=EXCLUDED.raw`,
-      [id, provider, injury.league, playerId, teamId, injury.status ?? null, injury.bodyPart ?? null,
-       injury.detail ?? null, injury.estimatedReturnDate ?? null, capturedAt, JSON.stringify(injury.raw ?? {})]
-    );
-    injuryCount += 1;
-  }
-
-  for (const transaction of input.transactions ?? []) {
-    const id = providerEntityId(provider, transaction.league, "transaction", transaction.providerTransactionId);
-    const playerId = transaction.playerProviderId
-      ? providerEntityId(provider, transaction.league, "player", transaction.playerProviderId) : null;
-    const teamId = transaction.teamProviderId
-      ? providerEntityId(provider, transaction.league, "team", transaction.teamProviderId) : null;
-    await db.query(
-      `INSERT INTO transactions (
-        id, provider, league, team_id, player_id, transaction_type, detail, occurred_at, captured_at, raw
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
-      ON CONFLICT (id) DO UPDATE SET
-        transaction_type=EXCLUDED.transaction_type, detail=EXCLUDED.detail,
-        occurred_at=EXCLUDED.occurred_at, captured_at=EXCLUDED.captured_at, raw=EXCLUDED.raw`,
-      [id, provider, transaction.league, teamId, playerId, transaction.transactionType ?? null,
-       transaction.detail ?? null, transaction.occurredAt ?? null, capturedAt, JSON.stringify(transaction.raw ?? {})]
-    );
-    transactionCount += 1;
-  }
-
-
-  const leagues = new Set<string>([
-    ...(input.teams ?? []).map((item) => item.league),
-    ...(input.players ?? []).map((item) => item.league),
-    ...(input.injuries ?? []).map((item) => item.league),
-    ...(input.transactions ?? []).map((item) => item.league)
-  ]);
-
-  for (const league of leagues) {
-    const leagueInjuries = (input.injuries ?? []).filter((item) => item.league === league);
-    const leagueTransactions = (input.transactions ?? []).filter((item) => item.league === league);
-
-    await db.query(
-      `INSERT INTO league_snapshots (provider, league, snapshot_type, captured_at, payload)
-       VALUES ($1,$2,'injuries',$3,$4::jsonb)
-       ON CONFLICT (provider, league, snapshot_type) DO UPDATE SET
-         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
-      [provider, league, capturedAt, JSON.stringify(leagueInjuries)]
-    );
-
-    await db.query(
-      `INSERT INTO league_snapshots (provider, league, snapshot_type, captured_at, payload)
-       VALUES ($1,$2,'transactions',$3,$4::jsonb)
-       ON CONFLICT (provider, league, snapshot_type) DO UPDATE SET
-         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
-      [provider, league, capturedAt, JSON.stringify(leagueTransactions)]
-    );
-  }
-
-  for (const team of input.teams ?? []) {
-    const teamPlayers = (input.players ?? []).filter(
-      (item) => item.league === team.league && item.teamProviderId === team.providerTeamId
-    );
-    const teamInjuries = (input.injuries ?? []).filter(
-      (item) => item.league === team.league && item.teamProviderId === team.providerTeamId
-    );
-
-    await db.query(
-      `INSERT INTO team_snapshots (provider, league, provider_team_id, snapshot_type, captured_at, payload)
-       VALUES ($1,$2,$3,'roster',$4,$5::jsonb)
-       ON CONFLICT (provider, league, provider_team_id, snapshot_type) DO UPDATE SET
-         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
-      [provider, team.league, team.providerTeamId, capturedAt, JSON.stringify(teamPlayers)]
-    );
-
-    await db.query(
-      `INSERT INTO team_snapshots (provider, league, provider_team_id, snapshot_type, captured_at, payload)
-       VALUES ($1,$2,$3,'injuries',$4,$5::jsonb)
-       ON CONFLICT (provider, league, provider_team_id, snapshot_type) DO UPDATE SET
-         captured_at=EXCLUDED.captured_at, payload=EXCLUDED.payload`,
-      [provider, team.league, team.providerTeamId, capturedAt, JSON.stringify(teamInjuries)]
-    );
-  }
-
-  return { teams: teamCount, players: playerCount, injuries: injuryCount, transactions: transactionCount };
-}
-
 export async function getKnowledgeCounts() {
   const db = pool();
   if (!db) return {
     teams: 0, players: 0, rosterSnapshots: 0, injuries: 0, transactions: 0,
     contextSnapshots: 0, featureSnapshots: 0, gamePackages: 0
   };
+
   await ensureSchema();
+  const dataLake = await import("./data-lake");
+  await dataLake.ensureDataLakeSchema();
+
   const result = await db.query(`
     SELECT
       (SELECT COUNT(*)::int FROM teams) AS teams,
       (SELECT COUNT(*)::int FROM players) AS players,
-      (SELECT COUNT(*)::int FROM roster_snapshots) AS roster_snapshots,
-      (SELECT COUNT(*)::int FROM injuries) AS injuries,
-      (SELECT COUNT(*)::int FROM transactions) AS transactions,
-      (SELECT COUNT(*)::int FROM game_context_snapshots) AS context_snapshots,
+      (SELECT COUNT(*)::int FROM team_snapshots WHERE snapshot_type = 'roster') AS roster_snapshots,
+      (
+        (SELECT COUNT(*)::int FROM team_snapshots WHERE snapshot_type = 'injuries') +
+        (SELECT COUNT(*)::int FROM league_snapshots WHERE snapshot_type = 'injuries')
+      ) AS injuries,
+      (SELECT COUNT(*)::int FROM league_snapshots WHERE snapshot_type = 'transactions') AS transactions,
+      (SELECT COUNT(*)::int FROM feature_snapshots) AS context_snapshots,
       (SELECT COUNT(*)::int FROM feature_snapshots) AS feature_snapshots,
       (SELECT COUNT(*)::int FROM game_packages) AS game_packages
   `);
@@ -1043,7 +703,6 @@ export async function getKnowledgeCounts() {
     gamePackages: Number(row.game_packages ?? 0)
   };
 }
-
 
 export async function getNamedState<T = any>(id: string): Promise<T | null> {
   const db = pool();
@@ -1068,66 +727,6 @@ export async function saveNamedState(id: string, payload: unknown) {
   );
 }
 
-
-export async function listGamesNeedingPackages(limit = 20) {
-  const db = pool();
-  if (!db) return [];
-  await ensureSchema();
-  const result = await db.query(
-    `SELECT g.id, g.provider, g.provider_game_id, g.league, g.starts_at
-     FROM games g
-     LEFT JOIN game_packages gp ON gp.game_id = g.id
-     WHERE gp.game_id IS NULL
-       AND g.starts_at <= NOW()
-     ORDER BY g.starts_at DESC
-     LIMIT $1`,
-    [Math.max(1, Math.min(200, limit))]
-  );
-  return result.rows.map((row: any) => ({
-    id: row.id,
-    provider: row.provider,
-    providerGameId: row.provider_game_id,
-    league: row.league,
-    startsAt: new Date(row.starts_at).toISOString()
-  }));
-}
-
-export async function upsertGamePackage(
-  gameId: string,
-  provider: string,
-  payload: {
-    summary?: unknown;
-    boxscore?: unknown;
-    plays?: unknown;
-    leaders?: unknown;
-    raw?: unknown;
-  }
-) {
-  const db = pool();
-  if (!db) return false;
-  await ensureSchema();
-  await db.query(
-    `INSERT INTO game_packages (game_id, provider, captured_at, summary, boxscore, plays, leaders, raw)
-     VALUES ($1,$2,NOW(),$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb)
-     ON CONFLICT (game_id) DO UPDATE SET
-       captured_at=EXCLUDED.captured_at,
-       summary=EXCLUDED.summary,
-       boxscore=EXCLUDED.boxscore,
-       plays=EXCLUDED.plays,
-       leaders=EXCLUDED.leaders,
-       raw=EXCLUDED.raw`,
-    [
-      gameId,
-      provider,
-      JSON.stringify(payload.summary ?? {}),
-      JSON.stringify(payload.boxscore ?? {}),
-      JSON.stringify(payload.plays ?? []),
-      JSON.stringify(payload.leaders ?? []),
-      JSON.stringify(payload.raw ?? {})
-    ]
-  );
-  return true;
-}
 
 async function challengerStateByLeague() {
   const db = pool();
