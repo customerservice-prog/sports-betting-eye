@@ -386,3 +386,57 @@ export async function getDataLakeStats() {
     gamePackages: Number(row.game_packages ?? 0)
   };
 }
+
+
+export async function teamsNeedingRefresh(provider: string, limit = 24, staleHours = 12) {
+  const db = getDatabasePool();
+  if (!db) return [];
+  await ensureDataLakeSchema();
+
+  const result = await db.query(
+    `SELECT t.league, t.provider_team_id, t.display_name, t.abbreviation,
+       roster.captured_at AS roster_captured_at
+     FROM teams t
+     LEFT JOIN team_snapshots roster
+       ON roster.provider = t.provider
+      AND roster.league = t.league
+      AND roster.provider_team_id = t.provider_team_id
+      AND roster.snapshot_type = 'roster'
+     WHERE t.provider = $1
+       AND (
+         roster.captured_at IS NULL OR
+         roster.captured_at < NOW() - ($2 * INTERVAL '1 hour')
+       )
+     ORDER BY roster.captured_at NULLS FIRST, t.league, t.display_name
+     LIMIT $3`,
+    [provider, Math.max(1, staleHours), Math.max(1, Math.min(200, limit))]
+  );
+
+  return result.rows.map((row) => ({
+    league: row.league as League,
+    teamId: String(row.provider_team_id),
+    displayName: String(row.display_name),
+    abbreviation: String(row.abbreviation ?? "")
+  }));
+}
+
+export async function leagueSnapshotDue(
+  provider: string,
+  league: League,
+  snapshotType: string,
+  staleMinutes: number
+) {
+  const db = getDatabasePool();
+  if (!db) return true;
+  await ensureDataLakeSchema();
+
+  const result = await db.query(
+    `SELECT captured_at
+     FROM league_snapshots
+     WHERE provider = $1 AND league = $2 AND snapshot_type = $3`,
+    [provider, league, snapshotType]
+  );
+  const captured = result.rows[0]?.captured_at;
+  if (!captured) return true;
+  return Date.now() - new Date(captured).getTime() >= Math.max(1, staleMinutes) * 60_000;
+}
