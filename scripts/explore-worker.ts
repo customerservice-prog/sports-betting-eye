@@ -1,9 +1,7 @@
 import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
 import {
   backfillHistoricalChunk,
-  hydrateGamePackages,
-  ingestCurrentSportsData,
-  ingestReferenceKnowledge
+  ingestCurrentSportsData
 } from "../lib/ingestion";
 import { ingestSportsIntelligence } from "../lib/intelligence-ingestion";
 import { evaluateRealModels } from "../lib/model-evaluation";
@@ -15,12 +13,6 @@ async function main() {
     byLeague: {},
     errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Ingestion failed" }],
     completedAt: new Date().toISOString()
-  }));
-
-  const referenceKnowledge = await ingestReferenceKnowledge().catch((error) => ({
-    skipped: false,
-    totals: { teams: 0, players: 0, injuries: 0, transactions: 0 },
-    errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Reference ingestion failed" }]
   }));
 
   const backfill = await backfillHistoricalChunk(
@@ -42,14 +34,6 @@ async function main() {
     teamSnapshotsUpdated: 0,
     errors: [{ scope: "SYSTEM", message: error instanceof Error ? error.message : "Intelligence ingestion failed" }],
     completedAt: new Date().toISOString()
-  }));
-
-  const gamePackages = await hydrateGamePackages(
-    Math.max(1, Number(process.env.GAME_PACKAGES_PER_RUN || 12))
-  ).catch((error) => ({
-    attempted: 0,
-    stored: 0,
-    errors: [{ gameId: "SYSTEM", message: error instanceof Error ? error.message : "Game package hydration failed" }]
   }));
 
   const predictionGeneration = await generateScheduledBaselinePredictions(500).catch((error) => ({
@@ -84,12 +68,6 @@ async function main() {
     mode: "real-sports-data-lake-plus-prediction-proof-plus-paper-exploration",
     realGamesIngested: ingestion.totalGames,
     ingestionErrors: ingestion.errors.length,
-    referenceKnowledgeSkipped: referenceKnowledge.skipped,
-    teamsRefreshed: referenceKnowledge.totals.teams,
-    playersRefreshed: referenceKnowledge.totals.players,
-    injuriesRefreshed: referenceKnowledge.totals.injuries,
-    transactionsRefreshed: referenceKnowledge.totals.transactions,
-    referenceKnowledgeErrors: referenceKnowledge.errors.length,
     historicalGamesAdded: backfill.gamesAdded,
     historicalGamesStored: backfill.gamesStored,
     historicalBackfillChunks: backfill.chunksCompleted,
@@ -102,9 +80,6 @@ async function main() {
     intelligenceLeagueSnapshotsUpdated: intelligence.leagueSnapshotsUpdated,
     intelligenceTeamSnapshotsUpdated: intelligence.teamSnapshotsUpdated,
     intelligenceErrors: intelligence.errors.length,
-    gamePackagesAttempted: gamePackages.attempted,
-    gamePackagesStored: gamePackages.stored,
-    gamePackageErrors: gamePackages.errors.length,
     realPredictionsCreated: predictionGeneration.created,
     realPredictionsSkipped: predictionGeneration.skipped,
     predictionsGraded: grading.graded,
