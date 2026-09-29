@@ -8,7 +8,6 @@ import {
   predictRealModels,
   type LeagueModelState
 } from "./modeling/challengers";
-import { applyCompletedGame, createLeagueModelState, predictRealModels } from "./modeling/challengers";
 import { capturePregameFeatureSnapshot } from "./features/pregame";
 
 declare global {
