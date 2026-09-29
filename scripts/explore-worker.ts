@@ -1,5 +1,6 @@
 import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
 import { backfillHistoricalChunk, ingestCurrentSportsData } from "../lib/ingestion";
+import { ingestSportsIntelligence } from "../lib/intelligence-ingestion";
 
 async function main() {
   const ingestion = await ingestCurrentSportsData().catch((error) => ({
@@ -18,6 +19,17 @@ async function main() {
     gamesStored: 0,
     gamesAdded: 0,
     errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Backfill failed" }]
+  }));
+
+  const intelligence = await ingestSportsIntelligence().catch((error) => ({
+    teamsUpdated: 0,
+    playersUpdated: 0,
+    profilesUpdated: 0,
+    gamePackagesUpdated: 0,
+    leagueSnapshotsUpdated: 0,
+    teamSnapshotsUpdated: 0,
+    errors: [{ scope: "SYSTEM", message: error instanceof Error ? error.message : "Intelligence ingestion failed" }],
+    completedAt: new Date().toISOString()
   }));
 
   const predictionGeneration = await generateScheduledBaselinePredictions(500).catch((error) => ({
@@ -43,7 +55,7 @@ async function main() {
 
   console.log(JSON.stringify({
     ok: true,
-    mode: "real-schedule-ingestion-plus-synthetic-paper-exploration",
+    mode: "real-sports-data-lake-plus-prediction-proof-plus-paper-exploration",
     realGamesIngested: ingestion.totalGames,
     ingestionErrors: ingestion.errors.length,
     historicalGamesAdded: backfill.gamesAdded,
@@ -51,6 +63,13 @@ async function main() {
     historicalBackfillChunks: backfill.chunksCompleted,
     historicalBackfillComplete: backfill.complete,
     historicalBackfillErrors: backfill.errors.length,
+    intelligenceTeamsUpdated: intelligence.teamsUpdated,
+    intelligencePlayersUpdated: intelligence.playersUpdated,
+    intelligenceProfilesUpdated: intelligence.profilesUpdated,
+    intelligenceGamePackagesUpdated: intelligence.gamePackagesUpdated,
+    intelligenceLeagueSnapshotsUpdated: intelligence.leagueSnapshotsUpdated,
+    intelligenceTeamSnapshotsUpdated: intelligence.teamSnapshotsUpdated,
+    intelligenceErrors: intelligence.errors.length,
     realPredictionsCreated: predictionGeneration.created,
     realPredictionsSkipped: predictionGeneration.skipped,
     predictionsGraded: grading.graded,
