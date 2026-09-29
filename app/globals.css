@@ -1393,3 +1393,63 @@ button { color: inherit; }
   margin-top: 5px;
   line-height: 1.4;
 }
+
+
+.coverage-panel {
+  margin: 16px 0;
+}
+
+.coverage-source {
+  color: var(--muted-2);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 9px;
+}
+
+.coverage-card {
+  min-height: 112px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.018);
+  border-radius: 12px;
+  padding: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.coverage-card svg {
+  color: var(--purple-2);
+  margin-bottom: 12px;
+}
+
+.coverage-card strong {
+  font-size: 20px;
+  letter-spacing: -.035em;
+}
+
+.coverage-card > span {
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.coverage-card small {
+  color: var(--muted-2);
+  font-size: 8px;
+  margin-top: auto;
+}
+
+@media (max-width: 900px) {
+  .coverage-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 430px) {
+  .coverage-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+  .coverage-card { min-height: 104px; padding: 11px; }
+}
