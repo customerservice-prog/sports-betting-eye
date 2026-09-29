@@ -33,6 +33,7 @@ import {
 } from "@/lib/engine";
 import { GamePrediction, League, PaperState } from "@/lib/types";
 import LiveGamesPanel from "@/components/LiveGamesPanel";
+import DataCoveragePanel from "@/components/DataCoveragePanel";
 
 type View = "overview" | "games" | "brain" | "bankroll" | "models" | "mistakes" | "proof";
 
@@ -295,6 +296,7 @@ function Overview({
       </section>
 
       <LiveGamesPanel compact />
+      <DataCoveragePanel />
 
       <div className="content-grid">
         <section className="panel slate-panel">
