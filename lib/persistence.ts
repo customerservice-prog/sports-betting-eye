@@ -873,3 +873,27 @@ export async function getKnowledgeCounts() {
     contextSnapshots: Number(row.context_snapshots ?? 0)
   };
 }
+
+
+export async function getNamedState<T = any>(id: string): Promise<T | null> {
+  const db = pool();
+  if (!db) return null;
+  await ensureSchema();
+  const result = await db.query<{ payload: T }>(
+    "SELECT payload FROM sports_eye_state WHERE id = $1",
+    [id]
+  );
+  return result.rows[0]?.payload ?? null;
+}
+
+export async function saveNamedState(id: string, payload: unknown) {
+  const db = pool();
+  if (!db) return;
+  await ensureSchema();
+  await db.query(
+    `INSERT INTO sports_eye_state (id, payload, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+    [id, JSON.stringify(payload)]
+  );
+}
