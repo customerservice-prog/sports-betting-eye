@@ -138,26 +138,50 @@ export async function backfillHistoricalChunk(daysPerChunk = 7) {
 
 export async function ingestReferenceKnowledge(input?: { force?: boolean; maxLeagues?: number }) {
   const refreshHours = Math.max(1, Number(process.env.REFERENCE_REFRESH_HOURS || 6));
-  const state = await getNamedState<{ lastCompletedAt?: string }>("reference_ingestion");
-  const last = state?.lastCompletedAt ? new Date(state.lastCompletedAt).getTime() : 0;
-  const due = input?.force || !last || Date.now() - last >= refreshHours * 60 * 60 * 1000;
+  const perRun = Math.max(
+    1,
+    Math.min(
+      sportsEyeLeagues.length,
+      input?.maxLeagues ?? Number(process.env.REFERENCE_LEAGUES_PER_RUN || 1)
+    )
+  );
+  const state = await getNamedState<{
+    lastCycleCompletedAt?: string;
+    nextLeagueIndex?: number;
+  }>("reference_ingestion");
+
+  const startIndex = Math.max(0, Math.min(
+    sportsEyeLeagues.length - 1,
+    Number(state?.nextLeagueIndex ?? 0)
+  ));
+  const lastCycle = state?.lastCycleCompletedAt
+    ? new Date(state.lastCycleCompletedAt).getTime()
+    : 0;
+  const atCycleStart = startIndex === 0;
+  const due = input?.force || !atCycleStart || !lastCycle ||
+    Date.now() - lastCycle >= refreshHours * 60 * 60 * 1000;
 
   if (!due) {
     return {
       skipped: true,
       reason: "refresh-window",
-      lastCompletedAt: state?.lastCompletedAt ?? null,
+      lastCompletedAt: state?.lastCycleCompletedAt ?? null,
       totals: { teams: 0, players: 0, injuries: 0, transactions: 0 },
+      leaguesProcessed: [] as string[],
       errors: [] as Array<{ league: string; message: string }>
     };
   }
 
   const provider = new ESPNReferenceProvider();
-  const maxLeagues = Math.max(1, Math.min(sportsEyeLeagues.length, input?.maxLeagues ?? sportsEyeLeagues.length));
   const totals = { teams: 0, players: 0, injuries: 0, transactions: 0 };
   const errors: Array<{ league: string; message: string }> = [];
+  const leaguesProcessed: string[] = [];
 
-  for (const league of sportsEyeLeagues.slice(0, maxLeagues)) {
+  let nextIndex = startIndex;
+  for (let offset = 0; offset < perRun; offset += 1) {
+    const index = (startIndex + offset) % sportsEyeLeagues.length;
+    const league = sportsEyeLeagues[index];
+    leaguesProcessed.push(league);
     try {
       const bundle = await provider.getReferenceBundle(league);
       const stored = await upsertReferenceData(provider.name, {
@@ -174,21 +198,32 @@ export async function ingestReferenceKnowledge(input?: { force?: boolean; maxLea
         message: error instanceof Error ? error.message : "Reference ingestion failed"
       });
     }
+    nextIndex = (index + 1) % sportsEyeLeagues.length;
   }
 
   const completedAt = new Date().toISOString();
-  if (errors.length === 0) {
-    await saveNamedState("reference_ingestion", { lastCompletedAt: completedAt, totals });
-  }
+  const cycleCompleted = nextIndex === 0;
+  await saveNamedState("reference_ingestion", {
+    nextLeagueIndex: nextIndex,
+    lastCycleCompletedAt: cycleCompleted
+      ? completedAt
+      : state?.lastCycleCompletedAt ?? null,
+    lastRunAt: completedAt,
+    lastLeaguesProcessed: leaguesProcessed,
+    lastTotals: totals,
+    lastErrors: errors
+  });
 
   return {
     skipped: false,
     completedAt,
+    cycleCompleted,
+    nextLeagueIndex: nextIndex,
     totals,
+    leaguesProcessed,
     errors
   };
 }
-
 
 export async function hydrateGamePackages(limit = 12) {
   const games = await listGamesNeedingPackages(limit);
