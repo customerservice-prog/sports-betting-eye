@@ -1,5 +1,10 @@
 import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
-import { backfillHistoricalChunk, ingestCurrentSportsData, ingestReferenceKnowledge } from "../lib/ingestion";
+import {
+  backfillHistoricalChunk,
+  hydrateGamePackages,
+  ingestCurrentSportsData,
+  ingestReferenceKnowledge
+} from "../lib/ingestion";
 import { ingestSportsIntelligence } from "../lib/intelligence-ingestion";
 import { evaluateRealModels } from "../lib/model-evaluation";
 
@@ -37,6 +42,14 @@ async function main() {
     teamSnapshotsUpdated: 0,
     errors: [{ scope: "SYSTEM", message: error instanceof Error ? error.message : "Intelligence ingestion failed" }],
     completedAt: new Date().toISOString()
+  }));
+
+  const gamePackages = await hydrateGamePackages(
+    Math.max(1, Number(process.env.GAME_PACKAGES_PER_RUN || 12))
+  ).catch((error) => ({
+    attempted: 0,
+    stored: 0,
+    errors: [{ gameId: "SYSTEM", message: error instanceof Error ? error.message : "Game package hydration failed" }]
   }));
 
   const predictionGeneration = await generateScheduledBaselinePredictions(500).catch((error) => ({
@@ -89,6 +102,9 @@ async function main() {
     intelligenceLeagueSnapshotsUpdated: intelligence.leagueSnapshotsUpdated,
     intelligenceTeamSnapshotsUpdated: intelligence.teamSnapshotsUpdated,
     intelligenceErrors: intelligence.errors.length,
+    gamePackagesAttempted: gamePackages.attempted,
+    gamePackagesStored: gamePackages.stored,
+    gamePackageErrors: gamePackages.errors.length,
     realPredictionsCreated: predictionGeneration.created,
     realPredictionsSkipped: predictionGeneration.skipped,
     predictionsGraded: grading.graded,
