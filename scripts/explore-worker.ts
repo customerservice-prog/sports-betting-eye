@@ -1,5 +1,5 @@
 import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
-import { backfillHistoricalChunk, ingestCurrentSportsData } from "../lib/ingestion";
+import { backfillHistoricalChunk, ingestCurrentSportsData, ingestReferenceKnowledge } from "../lib/ingestion";
 import { ingestSportsIntelligence } from "../lib/intelligence-ingestion";
 import { evaluateRealModels } from "../lib/model-evaluation";
 
@@ -10,6 +10,12 @@ async function main() {
     byLeague: {},
     errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Ingestion failed" }],
     completedAt: new Date().toISOString()
+  }));
+
+  const referenceKnowledge = await ingestReferenceKnowledge().catch((error) => ({
+    skipped: false,
+    totals: { teams: 0, players: 0, injuries: 0, transactions: 0 },
+    errors: [{ league: "SYSTEM", message: error instanceof Error ? error.message : "Reference ingestion failed" }]
   }));
 
   const backfill = await backfillHistoricalChunk(
@@ -65,6 +71,12 @@ async function main() {
     mode: "real-sports-data-lake-plus-prediction-proof-plus-paper-exploration",
     realGamesIngested: ingestion.totalGames,
     ingestionErrors: ingestion.errors.length,
+    referenceKnowledgeSkipped: referenceKnowledge.skipped,
+    teamsRefreshed: referenceKnowledge.totals.teams,
+    playersRefreshed: referenceKnowledge.totals.players,
+    injuriesRefreshed: referenceKnowledge.totals.injuries,
+    transactionsRefreshed: referenceKnowledge.totals.transactions,
+    referenceKnowledgeErrors: referenceKnowledge.errors.length,
     historicalGamesAdded: backfill.gamesAdded,
     historicalGamesStored: backfill.gamesStored,
     historicalBackfillChunks: backfill.chunksCompleted,
