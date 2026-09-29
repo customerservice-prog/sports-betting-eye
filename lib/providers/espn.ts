@@ -39,7 +39,25 @@ export class ESPNPublicProvider {
   async getRange(league: League, from: Date, to: Date): Promise<FeedGame[]> {
     const format = (date: Date) =>
       `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}`;
-    return this.fetchScoreboard(league, `${format(from)}-${format(to)}`);
+
+    const days: Date[] = [];
+    const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+    const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
+
+    while (cursor.getTime() <= end.getTime()) {
+      days.push(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    const games: FeedGame[] = [];
+    for (const day of days) {
+      const daily = await this.fetchScoreboard(league, format(day));
+      games.push(...daily);
+    }
+
+    const deduped = new Map<string, FeedGame>();
+    for (const game of games) deduped.set(game.providerGameId, game);
+    return [...deduped.values()];
   }
 
   private async fetchScoreboard(league: League, dates?: string): Promise<FeedGame[]> {
