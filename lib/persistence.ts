@@ -684,3 +684,192 @@ export async function gradeCompletedPredictions(limit = 500) {
 
   return { graded, mistakesCreated };
 }
+
+
+export type TeamRecordInput = {
+  providerTeamId: string;
+  league: string;
+  name: string;
+  abbreviation?: string;
+  location?: string;
+  raw?: Record<string, unknown>;
+};
+
+export type PlayerRecordInput = {
+  providerPlayerId: string;
+  league: string;
+  fullName: string;
+  firstName?: string;
+  lastName?: string;
+  position?: string;
+  jersey?: string;
+  height?: string;
+  weight?: string;
+  age?: number;
+  experience?: string;
+  active?: boolean;
+  teamProviderId?: string;
+  starter?: boolean;
+  depthOrder?: number;
+  rosterStatus?: string;
+  raw?: Record<string, unknown>;
+};
+
+export type InjuryRecordInput = {
+  providerInjuryId: string;
+  league: string;
+  playerProviderId?: string;
+  teamProviderId?: string;
+  status?: string;
+  bodyPart?: string;
+  detail?: string;
+  estimatedReturnDate?: string;
+  raw?: Record<string, unknown>;
+};
+
+export type TransactionRecordInput = {
+  providerTransactionId: string;
+  league: string;
+  playerProviderId?: string;
+  teamProviderId?: string;
+  transactionType?: string;
+  detail?: string;
+  occurredAt?: string;
+  raw?: Record<string, unknown>;
+};
+
+function providerEntityId(provider: string, league: string, kind: string, providerId: string) {
+  return `${provider}:${league}:${kind}:${providerId}`;
+}
+
+export async function upsertReferenceData(
+  provider: string,
+  input: {
+    teams?: TeamRecordInput[];
+    players?: PlayerRecordInput[];
+    injuries?: InjuryRecordInput[];
+    transactions?: TransactionRecordInput[];
+    capturedAt?: string;
+  }
+) {
+  const db = pool();
+  if (!db) return { teams: 0, players: 0, injuries: 0, transactions: 0 };
+  await ensureSchema();
+  const capturedAt = input.capturedAt ?? new Date().toISOString();
+
+  let teamCount = 0;
+  let playerCount = 0;
+  let injuryCount = 0;
+  let transactionCount = 0;
+
+  for (const team of input.teams ?? []) {
+    const id = providerEntityId(provider, team.league, "team", team.providerTeamId);
+    await db.query(
+      `INSERT INTO teams (id, provider, provider_team_id, league, name, abbreviation, location, raw, source_updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+       ON CONFLICT (provider, provider_team_id, league) DO UPDATE SET
+         name=EXCLUDED.name, abbreviation=EXCLUDED.abbreviation, location=EXCLUDED.location,
+         raw=EXCLUDED.raw, source_updated_at=EXCLUDED.source_updated_at`,
+      [id, provider, team.providerTeamId, team.league, team.name, team.abbreviation ?? null,
+       team.location ?? null, JSON.stringify(team.raw ?? {}), capturedAt]
+    );
+    teamCount += 1;
+  }
+
+  for (const player of input.players ?? []) {
+    const id = providerEntityId(provider, player.league, "player", player.providerPlayerId);
+    await db.query(
+      `INSERT INTO players (
+        id, provider, provider_player_id, league, full_name, first_name, last_name, position,
+        jersey, height, weight, age, experience, active, raw, source_updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
+      ON CONFLICT (provider, provider_player_id, league) DO UPDATE SET
+        full_name=EXCLUDED.full_name, first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
+        position=EXCLUDED.position, jersey=EXCLUDED.jersey, height=EXCLUDED.height,
+        weight=EXCLUDED.weight, age=EXCLUDED.age, experience=EXCLUDED.experience,
+        active=EXCLUDED.active, raw=EXCLUDED.raw, source_updated_at=EXCLUDED.source_updated_at`,
+      [id, provider, player.providerPlayerId, player.league, player.fullName, player.firstName ?? null,
+       player.lastName ?? null, player.position ?? null, player.jersey ?? null, player.height ?? null,
+       player.weight ?? null, player.age ?? null, player.experience ?? null, player.active ?? null,
+       JSON.stringify(player.raw ?? {}), capturedAt]
+    );
+
+    if (player.teamProviderId) {
+      const teamId = providerEntityId(provider, player.league, "team", player.teamProviderId);
+      await db.query(
+        `INSERT INTO roster_snapshots (
+          team_id, player_id, league, captured_at, starter, depth_order, roster_status, raw
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+        [teamId, id, player.league, capturedAt, player.starter ?? null, player.depthOrder ?? null,
+         player.rosterStatus ?? null, JSON.stringify(player.raw ?? {})]
+      ).catch(() => undefined);
+    }
+    playerCount += 1;
+  }
+
+  for (const injury of input.injuries ?? []) {
+    const id = providerEntityId(provider, injury.league, "injury", injury.providerInjuryId);
+    const playerId = injury.playerProviderId
+      ? providerEntityId(provider, injury.league, "player", injury.playerProviderId) : null;
+    const teamId = injury.teamProviderId
+      ? providerEntityId(provider, injury.league, "team", injury.teamProviderId) : null;
+    await db.query(
+      `INSERT INTO injuries (
+        id, provider, league, player_id, team_id, status, body_part, detail,
+        estimated_return_date, captured_at, raw
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+      ON CONFLICT (id) DO UPDATE SET
+        status=EXCLUDED.status, body_part=EXCLUDED.body_part, detail=EXCLUDED.detail,
+        estimated_return_date=EXCLUDED.estimated_return_date, captured_at=EXCLUDED.captured_at,
+        raw=EXCLUDED.raw`,
+      [id, provider, injury.league, playerId, teamId, injury.status ?? null, injury.bodyPart ?? null,
+       injury.detail ?? null, injury.estimatedReturnDate ?? null, capturedAt, JSON.stringify(injury.raw ?? {})]
+    );
+    injuryCount += 1;
+  }
+
+  for (const transaction of input.transactions ?? []) {
+    const id = providerEntityId(provider, transaction.league, "transaction", transaction.providerTransactionId);
+    const playerId = transaction.playerProviderId
+      ? providerEntityId(provider, transaction.league, "player", transaction.playerProviderId) : null;
+    const teamId = transaction.teamProviderId
+      ? providerEntityId(provider, transaction.league, "team", transaction.teamProviderId) : null;
+    await db.query(
+      `INSERT INTO transactions (
+        id, provider, league, team_id, player_id, transaction_type, detail, occurred_at, captured_at, raw
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+      ON CONFLICT (id) DO UPDATE SET
+        transaction_type=EXCLUDED.transaction_type, detail=EXCLUDED.detail,
+        occurred_at=EXCLUDED.occurred_at, captured_at=EXCLUDED.captured_at, raw=EXCLUDED.raw`,
+      [id, provider, transaction.league, teamId, playerId, transaction.transactionType ?? null,
+       transaction.detail ?? null, transaction.occurredAt ?? null, capturedAt, JSON.stringify(transaction.raw ?? {})]
+    );
+    transactionCount += 1;
+  }
+
+  return { teams: teamCount, players: playerCount, injuries: injuryCount, transactions: transactionCount };
+}
+
+export async function getKnowledgeCounts() {
+  const db = pool();
+  if (!db) return { teams: 0, players: 0, rosterSnapshots: 0, injuries: 0, transactions: 0, contextSnapshots: 0 };
+  await ensureSchema();
+  const result = await db.query(`
+    SELECT
+      (SELECT COUNT(*)::int FROM teams) AS teams,
+      (SELECT COUNT(*)::int FROM players) AS players,
+      (SELECT COUNT(*)::int FROM roster_snapshots) AS roster_snapshots,
+      (SELECT COUNT(*)::int FROM injuries) AS injuries,
+      (SELECT COUNT(*)::int FROM transactions) AS transactions,
+      (SELECT COUNT(*)::int FROM game_context_snapshots) AS context_snapshots
+  `);
+  const row = result.rows[0] ?? {};
+  return {
+    teams: Number(row.teams ?? 0),
+    players: Number(row.players ?? 0),
+    rosterSnapshots: Number(row.roster_snapshots ?? 0),
+    injuries: Number(row.injuries ?? 0),
+    transactions: Number(row.transactions ?? 0),
+    contextSnapshots: Number(row.context_snapshots ?? 0)
+  };
+}
