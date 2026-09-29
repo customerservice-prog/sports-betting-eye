@@ -1,5 +1,12 @@
-import { ESPNPublicProvider, ESPNReferenceProvider, sportsEyeLeagues } from "./providers/espn";
-import { getNamedState, saveNamedState, upsertProviderGames, upsertReferenceData } from "./persistence";
+import { ESPNPublicProvider, ESPNReferenceProvider, fetchESPNGamePackage, sportsEyeLeagues } from "./providers/espn";
+import {
+  getNamedState,
+  listGamesNeedingPackages,
+  saveNamedState,
+  upsertGamePackage,
+  upsertProviderGames,
+  upsertReferenceData
+} from "./persistence";
 import { League } from "./types";
 
 export type IngestionResult = {
@@ -167,4 +174,28 @@ export async function ingestReferenceKnowledge(input?: { force?: boolean; maxLea
     totals,
     errors
   };
+}
+
+
+export async function hydrateGamePackages(limit = 12) {
+  const games = await listGamesNeedingPackages(limit);
+  let stored = 0;
+  const errors: Array<{ gameId: string; message: string }> = [];
+
+  for (const game of games) {
+    if (game.provider !== "espn-public") continue;
+    try {
+      const league = game.league as League;
+      const payload = await fetchESPNGamePackage(league, game.providerGameId);
+      await upsertGamePackage(game.id, game.provider, payload);
+      stored += 1;
+    } catch (error) {
+      errors.push({
+        gameId: game.id,
+        message: error instanceof Error ? error.message : "Game package hydration failed"
+      });
+    }
+  }
+
+  return { attempted: games.length, stored, errors };
 }
