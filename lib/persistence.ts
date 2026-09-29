@@ -2,6 +2,12 @@ import { Pool, PoolClient } from "pg";
 import { createInitialPaperState, runExplorationBatch } from "./engine";
 import { PaperState } from "./types";
 import { applyEloResult, predictEloGame, type EloState } from "./modeling/elo";
+import {
+  applyCompletedGame,
+  createLeagueModelState,
+  predictRealModels,
+  type LeagueModelState
+} from "./modeling/challengers";
 import { applyCompletedGame, createLeagueModelState, predictRealModels } from "./modeling/challengers";
 import { capturePregameFeatureSnapshot } from "./features/pregame";
 
@@ -520,10 +526,10 @@ async function liveModelStatesByLeague() {
 
 export async function generateScheduledBaselinePredictions(limit = 250) {
   const db = pool();
-  if (!db) return { created: 0, skipped: 0, snapshotsCreated: 0, byModel: {} as Record<string, number> };
+  if (!db) return { created: 0, skipped: 0, models: {} as Record<string, number> };
   await ensureSchema();
 
-  const states = await liveModelStatesByLeague();
+  const states = await challengerStateByLeague();
   const games = await db.query(
     `SELECT id, league, starts_at, home_team, away_team
      FROM games
@@ -537,8 +543,7 @@ export async function generateScheduledBaselinePredictions(limit = 250) {
 
   let created = 0;
   let skipped = 0;
-  let snapshotsCreated = 0;
-  const byModel: Record<string, number> = {};
+  const models: Record<string, number> = {};
 
   for (const row of games.rows) {
     const state = states.get(row.league);
@@ -547,74 +552,50 @@ export async function generateScheduledBaselinePredictions(limit = 250) {
       continue;
     }
 
-    const existingSnapshot = await db.query(
-      "SELECT 1 FROM feature_snapshots WHERE game_id = $1 AND snapshot_type = 'pregame'",
-      [row.id]
-    );
-    const snapshot = await capturePregameFeatureSnapshot({
-      gameId: String(row.id),
-      league: row.league,
-      startsAt: new Date(row.starts_at).toISOString(),
-      homeTeam: String(row.home_team),
-      awayTeam: String(row.away_team)
-    });
-    if (!existingSnapshot.rowCount && snapshot) snapshotsCreated += 1;
-
-    const models = predictRealModels(state, String(row.home_team), String(row.away_team));
-    for (const model of models) {
-      const already = await db.query(
-        `SELECT id FROM predictions
-         WHERE game_id = $1 AND model_name = $2 AND model_version = $3
+    const predictions = predictRealModels(state, row.home_team, row.away_team);
+    for (const prediction of predictions) {
+      const existing = await db.query(
+        `SELECT 1 FROM predictions
+         WHERE game_id=$1 AND model_name=$2 AND model_version=$3
          LIMIT 1`,
-        [row.id, model.modelName, model.version]
+        [row.id, prediction.modelName, prediction.version]
       );
-      if (already.rowCount) {
+      if (existing.rowCount) {
         skipped += 1;
         continue;
       }
 
-      const probability = model.homeWinProbability;
-      const confidence = Math.abs(probability - 0.5);
-      const pickStatus =
-        model.modelName === "sports-ensemble" && confidence >= 0.16
-          ? "PROOF PICK"
-          : confidence >= 0.08
-            ? "EXPERIMENT"
-            : "NO PICK";
+      const confidence = Math.abs(prediction.homeWinProbability - 0.5);
+      const pickStatus = confidence >= 0.16 ? "PROOF PICK" : confidence >= 0.08 ? "EXPERIMENT" : "NO PICK";
 
-      const result = await db.query(
+      const inserted = await db.query(
         `INSERT INTO predictions (
           game_id, model_name, model_version, as_of,
           home_win_probability, predicted_home_score, predicted_away_score,
           uncertainty, pick_status, features
-        )
-        VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9::jsonb)
+        ) VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9::jsonb)
         RETURNING id`,
         [
           row.id,
-          model.modelName,
-          model.version,
-          probability,
-          model.predictedHomeScore,
-          model.predictedAwayScore,
-          model.uncertainty,
+          prediction.modelName,
+          prediction.version,
+          prediction.homeWinProbability,
+          prediction.predictedHomeScore,
+          prediction.predictedAwayScore,
+          prediction.uncertainty,
           pickStatus,
-          JSON.stringify({
-            ...model.features,
-            featureSnapshotCaptured: Boolean(snapshot),
-            generatedFrom: "real completed game history"
-          })
+          JSON.stringify(prediction.features)
         ]
       );
 
-      if (result.rowCount) {
+      if (inserted.rowCount) {
         created += 1;
-        byModel[model.modelName] = (byModel[model.modelName] ?? 0) + 1;
+        models[prediction.modelName] = (models[prediction.modelName] ?? 0) + 1;
       }
     }
   }
 
-  return { created, skipped, snapshotsCreated, byModel };
+  return { created, skipped, models };
 }
 
 export async function gradeCompletedPredictions(limit = 500) {
@@ -896,4 +877,127 @@ export async function saveNamedState(id: string, payload: unknown) {
      ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
     [id, JSON.stringify(payload)]
   );
+}
+
+
+export async function listGamesNeedingPackages(limit = 20) {
+  const db = pool();
+  if (!db) return [];
+  await ensureSchema();
+  const result = await db.query(
+    `SELECT g.id, g.provider, g.provider_game_id, g.league, g.starts_at
+     FROM games g
+     LEFT JOIN game_packages gp ON gp.game_id = g.id
+     WHERE gp.game_id IS NULL
+       AND g.starts_at <= NOW()
+     ORDER BY g.starts_at DESC
+     LIMIT $1`,
+    [Math.max(1, Math.min(200, limit))]
+  );
+  return result.rows.map((row: any) => ({
+    id: row.id,
+    provider: row.provider,
+    providerGameId: row.provider_game_id,
+    league: row.league,
+    startsAt: new Date(row.starts_at).toISOString()
+  }));
+}
+
+export async function upsertGamePackage(
+  gameId: string,
+  provider: string,
+  payload: {
+    summary?: unknown;
+    boxscore?: unknown;
+    plays?: unknown;
+    leaders?: unknown;
+    raw?: unknown;
+  }
+) {
+  const db = pool();
+  if (!db) return false;
+  await ensureSchema();
+  await db.query(
+    `INSERT INTO game_packages (game_id, provider, captured_at, summary, boxscore, plays, leaders, raw)
+     VALUES ($1,$2,NOW(),$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb)
+     ON CONFLICT (game_id) DO UPDATE SET
+       captured_at=EXCLUDED.captured_at,
+       summary=EXCLUDED.summary,
+       boxscore=EXCLUDED.boxscore,
+       plays=EXCLUDED.plays,
+       leaders=EXCLUDED.leaders,
+       raw=EXCLUDED.raw`,
+    [
+      gameId,
+      provider,
+      JSON.stringify(payload.summary ?? {}),
+      JSON.stringify(payload.boxscore ?? {}),
+      JSON.stringify(payload.plays ?? []),
+      JSON.stringify(payload.leaders ?? []),
+      JSON.stringify(payload.raw ?? {})
+    ]
+  );
+  return true;
+}
+
+async function challengerStateByLeague() {
+  const db = pool();
+  const byLeague = new Map<string, LeagueModelState>();
+  if (!db) return byLeague;
+  await ensureSchema();
+
+  const result = await db.query(
+    `SELECT id, league, starts_at, home_team, away_team, home_score, away_score
+     FROM games
+     WHERE status = 'final'
+       AND home_score IS NOT NULL
+       AND away_score IS NOT NULL
+       AND starts_at < NOW()
+     ORDER BY starts_at ASC`
+  );
+
+  for (const row of result.rows) {
+    const state = byLeague.get(row.league) ?? createLeagueModelState();
+    applyCompletedGame(state, {
+      id: row.id,
+      league: row.league,
+      startsAt: new Date(row.starts_at).toISOString(),
+      homeTeam: row.home_team,
+      awayTeam: row.away_team,
+      homeScore: Number(row.home_score),
+      awayScore: Number(row.away_score)
+    });
+    byLeague.set(row.league, state);
+  }
+  return byLeague;
+}
+
+export async function getModelScorecards() {
+  const db = pool();
+  if (!db) return [];
+  await ensureSchema();
+  const result = await db.query(
+    `SELECT
+       p.model_name,
+       p.model_version,
+       COUNT(pg.id)::int AS graded,
+       AVG(pg.brier)::double precision AS brier,
+       AVG(pg.log_loss)::double precision AS log_loss,
+       AVG(CASE
+         WHEN (p.home_win_probability >= 0.5 AND pg.home_won)
+           OR (p.home_win_probability < 0.5 AND NOT pg.home_won)
+         THEN 1.0 ELSE 0.0 END)::double precision AS accuracy
+     FROM predictions p
+     JOIN prediction_grades pg ON pg.prediction_id = p.id
+     GROUP BY p.model_name, p.model_version
+     ORDER BY AVG(pg.brier) ASC, COUNT(pg.id) DESC`
+  );
+  return result.rows.map((row: any) => ({
+    modelName: row.model_name,
+    modelVersion: row.model_version,
+    graded: Number(row.graded),
+    brier: row.brier === null ? null : Number(row.brier),
+    logLoss: row.log_loss === null ? null : Number(row.log_loss),
+    accuracy: row.accuracy === null ? null : Number(row.accuracy)
+  }));
 }
