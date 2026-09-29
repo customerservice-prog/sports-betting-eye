@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { getKnowledgeCounts, getSystemStats } from "@/lib/persistence";
+import { getArchiveStats } from "@/lib/archive-ingestion";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const [database, knowledge] = await Promise.all([getSystemStats(), getKnowledgeCounts()]);
+    const [database, knowledge, archive] = await Promise.all([
+      getSystemStats(),
+      getKnowledgeCounts(),
+      getArchiveStats()
+    ]);
     return NextResponse.json({
       ok: true,
       service: "sports-eye",
@@ -14,7 +19,8 @@ export async function GET() {
       dataMode: process.env.SPORTS_DATA_MODE || "demo",
       backgroundExploration: process.env.BACKGROUND_EXPLORATION_ENABLED === "true",
       database,
-      knowledge
+      knowledge,
+      archive
     });
   } catch (error) {
     return NextResponse.json(
