@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "explore:worker": "tsx scripts/explore-worker.ts"
+    "explore:worker": "tsx scripts/explore-worker.ts",
+    "archive:worker": "tsx scripts/archive-worker.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -15,7 +16,9 @@
     "pg": "^8.13.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "adm-zip": "^0.5.16",
+    "csv-parse": "^6.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
