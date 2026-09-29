@@ -23,6 +23,14 @@ type Coverage = {
     featureSnapshots?: number;
     gamePackages?: number;
   };
+  archive?: {
+    games?: number;
+    nflGames?: number;
+    mlbGames?: number;
+    records?: number;
+    retrosheetState?: { lastSeasonImported?: number; nextSeason?: number; complete?: boolean } | null;
+    nflverseState?: { minSeason?: number; maxSeason?: number } | null;
+  };
 };
 
 const number = (value?: number) => (value ?? 0).toLocaleString();
@@ -51,6 +59,7 @@ export default function DataCoveragePanel() {
 
   const counts = data?.database?.counts;
   const knowledge = data?.knowledge;
+  const archive = data?.archive;
 
   const cards = [
     ["Games", number(counts?.games), "historical + current", Database],
@@ -60,7 +69,10 @@ export default function DataCoveragePanel() {
     ["Injury records", number(knowledge?.injuries), "availability context", HeartPulse],
     ["Game packages", number(knowledge?.gamePackages), "boxscore + play detail", PackageOpen],
     ["Pregame snapshots", number(knowledge?.featureSnapshots), "frozen before prediction", FileClock],
-    ["Graded predictions", number(counts?.grades), "real evidence", Activity]
+    ["Graded predictions", number(counts?.grades), "real evidence", Activity],
+    ["NFL archive", number(archive?.nflGames), archive?.nflverseState?.minSeason ? `since ${archive.nflverseState.minSeason}` : "deep history", Database],
+    ["MLB archive", number(archive?.mlbGames), archive?.retrosheetState?.nextSeason ? `working toward ${archive.retrosheetState.nextSeason}` : "deep history", Database],
+    ["Archive records", number(archive?.records), "player + team game rows", PackageOpen]
   ] as const;
 
   return (
@@ -76,6 +88,7 @@ export default function DataCoveragePanel() {
       {error ? (
         <div className="feed-error">{error}</div>
       ) : (
+        <>
         <div className="coverage-grid">
           {cards.map(([label, value, detail, Icon]) => (
             <article className="coverage-card" key={label}>
@@ -86,6 +99,10 @@ export default function DataCoveragePanel() {
             </article>
           ))}
         </div>
+        <p className="archive-attribution">
+          MLB archive source: Retrosheet. The information used here was obtained free of charge from and is copyrighted by Retrosheet.
+        </p>
+        </>
       )}
     </section>
   );
