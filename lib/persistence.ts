@@ -156,11 +156,140 @@ export async function ensureSchema(client?: PoolClient) {
       ('sports-ensemble', 'v1', 'challenger')
     ON CONFLICT (model_name, model_version) DO NOTHING;
 
+
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      provider_team_id TEXT NOT NULL,
+      league TEXT NOT NULL,
+      name TEXT NOT NULL,
+      display_name TEXT,
+      abbreviation TEXT,
+      location TEXT,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+      source_updated_at TIMESTAMPTZ NOT NULL,
+      UNIQUE(provider, provider_team_id, league)
+    );
+
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+    CREATE TABLE IF NOT EXISTS players (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      provider_player_id TEXT NOT NULL,
+      league TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      first_name TEXT,
+      last_name TEXT,
+      position TEXT,
+      jersey TEXT,
+      height TEXT,
+      weight TEXT,
+      age INTEGER,
+      experience TEXT,
+      active BOOLEAN,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+      source_updated_at TIMESTAMPTZ NOT NULL,
+      UNIQUE(provider, provider_player_id, league)
+    );
+
+    CREATE TABLE IF NOT EXISTS roster_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      league TEXT NOT NULL,
+      captured_at TIMESTAMPTZ NOT NULL,
+      starter BOOLEAN,
+      depth_order INTEGER,
+      roster_status TEXT,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
+    CREATE TABLE IF NOT EXISTS injuries (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      league TEXT NOT NULL,
+      player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      status TEXT,
+      body_part TEXT,
+      detail TEXT,
+      estimated_return_date DATE,
+      captured_at TIMESTAMPTZ NOT NULL,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      league TEXT NOT NULL,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      transaction_type TEXT,
+      detail TEXT,
+      occurred_at TIMESTAMPTZ,
+      captured_at TIMESTAMPTZ NOT NULL,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
+    CREATE TABLE IF NOT EXISTS team_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      provider TEXT NOT NULL,
+      league TEXT NOT NULL,
+      provider_team_id TEXT NOT NULL,
+      snapshot_type TEXT NOT NULL,
+      captured_at TIMESTAMPTZ NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      UNIQUE(provider, league, provider_team_id, snapshot_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS league_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      provider TEXT NOT NULL,
+      league TEXT NOT NULL,
+      snapshot_type TEXT NOT NULL,
+      captured_at TIMESTAMPTZ NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      UNIQUE(provider, league, snapshot_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS game_context_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+      captured_at TIMESTAMPTZ NOT NULL,
+      home_rest_days DOUBLE PRECISION,
+      away_rest_days DOUBLE PRECISION,
+      weather JSONB NOT NULL DEFAULT '{}'::jsonb,
+      injuries JSONB NOT NULL DEFAULT '[]'::jsonb,
+      starters JSONB NOT NULL DEFAULT '[]'::jsonb,
+      market JSONB NOT NULL DEFAULT '[]'::jsonb,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
+    CREATE TABLE IF NOT EXISTS game_packages (
+      game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      captured_at TIMESTAMPTZ NOT NULL,
+      summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+      boxscore JSONB NOT NULL DEFAULT '{}'::jsonb,
+      plays JSONB NOT NULL DEFAULT '[]'::jsonb,
+      leaders JSONB NOT NULL DEFAULT '[]'::jsonb,
+      raw JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
     CREATE INDEX IF NOT EXISTS idx_games_starts_at ON games(starts_at);
     CREATE INDEX IF NOT EXISTS idx_predictions_game_id ON predictions(game_id);
     CREATE INDEX IF NOT EXISTS idx_feature_snapshots_game_id ON feature_snapshots(game_id);
     CREATE INDEX IF NOT EXISTS idx_model_backtests_model ON model_backtests(model_name, model_version);
     CREATE INDEX IF NOT EXISTS idx_exploration_batches_created_at ON exploration_batches(created_at);
+    CREATE INDEX IF NOT EXISTS idx_players_league_name ON players(league, full_name);
+    CREATE INDEX IF NOT EXISTS idx_roster_snapshots_team_time ON roster_snapshots(team_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_injuries_league_time ON injuries(league, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_transactions_league_time ON transactions(league, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_team_snapshots_lookup ON team_snapshots(provider, league, provider_team_id, snapshot_type);
+    CREATE INDEX IF NOT EXISTS idx_league_snapshots_lookup ON league_snapshots(provider, league, snapshot_type);
+    CREATE INDEX IF NOT EXISTS idx_game_context_game_time ON game_context_snapshots(game_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_game_packages_captured_at ON game_packages(captured_at DESC);
   `);
 
   return true;
@@ -745,10 +874,10 @@ export async function upsertReferenceData(
   for (const team of input.teams ?? []) {
     const id = providerEntityId(provider, team.league, "team", team.providerTeamId);
     await db.query(
-      `INSERT INTO teams (id, provider, provider_team_id, league, name, abbreviation, location, raw, source_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+      `INSERT INTO teams (id, provider, provider_team_id, league, name, display_name, abbreviation, location, raw, source_updated_at)
+       VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8::jsonb,$9)
        ON CONFLICT (provider, provider_team_id, league) DO UPDATE SET
-         name=EXCLUDED.name, abbreviation=EXCLUDED.abbreviation, location=EXCLUDED.location,
+         name=EXCLUDED.name, display_name=EXCLUDED.display_name, abbreviation=EXCLUDED.abbreviation, location=EXCLUDED.location,
          raw=EXCLUDED.raw, source_updated_at=EXCLUDED.source_updated_at`,
       [id, provider, team.providerTeamId, team.league, team.name, team.abbreviation ?? null,
        team.location ?? null, JSON.stringify(team.raw ?? {}), capturedAt]
