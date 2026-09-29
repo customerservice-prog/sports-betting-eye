@@ -1,6 +1,7 @@
 import { gradeCompletedPredictions, generateScheduledBaselinePredictions, runPersistentExplorationBatch } from "../lib/persistence";
 import { backfillHistoricalChunk, ingestCurrentSportsData } from "../lib/ingestion";
 import { ingestSportsIntelligence } from "../lib/intelligence-ingestion";
+import { evaluateRealModels } from "../lib/model-evaluation";
 
 async function main() {
   const ingestion = await ingestCurrentSportsData().catch((error) => ({
@@ -44,6 +45,12 @@ async function main() {
     error: error instanceof Error ? error.message : "Prediction grading failed"
   }));
 
+  const modelEvaluation = await evaluateRealModels().catch((error) => ({
+    groups: 0,
+    rows: 0,
+    error: error instanceof Error ? error.message : "Model evaluation failed"
+  }));
+
   const batchSize = Math.max(1, Number(process.env.EXPLORATION_BATCH_SIZE || 5000));
   const batches = Math.max(1, Number(process.env.EXPLORATION_BATCHES_PER_RUN || 20));
 
@@ -74,6 +81,8 @@ async function main() {
     realPredictionsSkipped: predictionGeneration.skipped,
     predictionsGraded: grading.graded,
     mistakesCreated: grading.mistakesCreated,
+    modelEvaluationGroups: modelEvaluation.groups,
+    modelEvaluationRows: modelEvaluation.rows,
     batches,
     batchSize,
     decisionsAdded: batches * batchSize,
