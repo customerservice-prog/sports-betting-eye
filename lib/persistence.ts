@@ -3,6 +3,7 @@ import { createInitialPaperState, runExplorationBatch } from "./engine";
 import { PaperState } from "./types";
 import { applyEloResult, predictEloGame, type EloState } from "./modeling/elo";
 import { applyCompletedGame, createLeagueModelState, predictRealModels } from "./modeling/challengers";
+import { capturePregameFeatureSnapshot } from "./features/pregame";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -485,12 +486,44 @@ export async function listLiveGamesWithBaseline(input?: { pastHours?: number; fu
 }
 
 
-export async function generateScheduledBaselinePredictions(limit = 250) {
+async function liveModelStatesByLeague() {
   const db = pool();
-  if (!db) return { created: 0, skipped: 0 };
+  const states = new Map<string, ReturnType<typeof createLeagueModelState>>();
+  if (!db) return states;
   await ensureSchema();
 
-  const elo = await eloStateByLeague();
+  const result = await db.query(
+    `SELECT id, league, starts_at, home_team, away_team, home_score, away_score
+     FROM games
+     WHERE status = 'final'
+       AND home_score IS NOT NULL
+       AND away_score IS NOT NULL
+       AND starts_at < NOW()
+     ORDER BY starts_at ASC`
+  );
+
+  for (const row of result.rows) {
+    const state = states.get(row.league) ?? createLeagueModelState();
+    applyCompletedGame(state, {
+      id: String(row.id),
+      league: String(row.league),
+      startsAt: new Date(row.starts_at).toISOString(),
+      homeTeam: String(row.home_team),
+      awayTeam: String(row.away_team),
+      homeScore: Number(row.home_score),
+      awayScore: Number(row.away_score)
+    });
+    states.set(row.league, state);
+  }
+  return states;
+}
+
+export async function generateScheduledBaselinePredictions(limit = 250) {
+  const db = pool();
+  if (!db) return { created: 0, skipped: 0, snapshotsCreated: 0, byModel: {} as Record<string, number> };
+  await ensureSchema();
+
+  const states = await liveModelStatesByLeague();
   const games = await db.query(
     `SELECT id, league, starts_at, home_team, away_team
      FROM games
@@ -504,46 +537,84 @@ export async function generateScheduledBaselinePredictions(limit = 250) {
 
   let created = 0;
   let skipped = 0;
+  let snapshotsCreated = 0;
+  const byModel: Record<string, number> = {};
 
   for (const row of games.rows) {
-    const league = elo.get(row.league);
-    if (!league || league.sampleSize < 10) {
+    const state = states.get(row.league);
+    if (!state || state.completedGames < 10) {
       skipped += 1;
       continue;
     }
 
-    const prediction = predictEloGame(league.state, row.home_team, row.away_team);
-    const probability = prediction.homeWinProbability;
-    const confidence = Math.abs(probability - 0.5);
-    const pickStatus = confidence >= 0.16 ? "PROOF PICK" : confidence >= 0.08 ? "EXPERIMENT" : "NO PICK";
-
-    const result = await db.query(
-      `INSERT INTO predictions (
-        game_id, model_name, model_version, as_of,
-        home_win_probability, uncertainty, pick_status, features
-      )
-      VALUES ($1, 'elo-real-games', 'v1', NOW(), $2, $3, $4, $5::jsonb)
-      ON CONFLICT DO NOTHING
-      RETURNING id`,
-      [
-        row.id,
-        probability,
-        Math.max(0.05, 0.5 - confidence),
-        pickStatus,
-        JSON.stringify({
-          leagueSampleSize: league.sampleSize,
-          homeRating: prediction.homeRating,
-          awayRating: prediction.awayRating,
-          generatedFrom: "real historical final games"
-        })
-      ]
+    const existingSnapshot = await db.query(
+      "SELECT 1 FROM feature_snapshots WHERE game_id = $1 AND snapshot_type = 'pregame'",
+      [row.id]
     );
+    const snapshot = await capturePregameFeatureSnapshot({
+      gameId: String(row.id),
+      league: row.league,
+      startsAt: new Date(row.starts_at).toISOString(),
+      homeTeam: String(row.home_team),
+      awayTeam: String(row.away_team)
+    });
+    if (!existingSnapshot.rowCount && snapshot) snapshotsCreated += 1;
 
-    if (result.rowCount) created += 1;
-    else skipped += 1;
+    const models = predictRealModels(state, String(row.home_team), String(row.away_team));
+    for (const model of models) {
+      const already = await db.query(
+        `SELECT id FROM predictions
+         WHERE game_id = $1 AND model_name = $2 AND model_version = $3
+         LIMIT 1`,
+        [row.id, model.modelName, model.version]
+      );
+      if (already.rowCount) {
+        skipped += 1;
+        continue;
+      }
+
+      const probability = model.homeWinProbability;
+      const confidence = Math.abs(probability - 0.5);
+      const pickStatus =
+        model.modelName === "sports-ensemble" && confidence >= 0.16
+          ? "PROOF PICK"
+          : confidence >= 0.08
+            ? "EXPERIMENT"
+            : "NO PICK";
+
+      const result = await db.query(
+        `INSERT INTO predictions (
+          game_id, model_name, model_version, as_of,
+          home_win_probability, predicted_home_score, predicted_away_score,
+          uncertainty, pick_status, features
+        )
+        VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9::jsonb)
+        RETURNING id`,
+        [
+          row.id,
+          model.modelName,
+          model.version,
+          probability,
+          model.predictedHomeScore,
+          model.predictedAwayScore,
+          model.uncertainty,
+          pickStatus,
+          JSON.stringify({
+            ...model.features,
+            featureSnapshotCaptured: Boolean(snapshot),
+            generatedFrom: "real completed game history"
+          })
+        ]
+      );
+
+      if (result.rowCount) {
+        created += 1;
+        byModel[model.modelName] = (byModel[model.modelName] ?? 0) + 1;
+      }
+    }
   }
 
-  return { created, skipped };
+  return { created, skipped, snapshotsCreated, byModel };
 }
 
 export async function gradeCompletedPredictions(limit = 500) {
