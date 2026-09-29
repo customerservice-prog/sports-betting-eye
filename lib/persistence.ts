@@ -28,6 +28,10 @@ export function databaseConfigured() {
   return Boolean(process.env.DATABASE_URL);
 }
 
+export function getDatabasePool() {
+  return pool();
+}
+
 export async function ensureSchema(client?: PoolClient) {
   const target = client ?? pool();
   if (!target) return false;
