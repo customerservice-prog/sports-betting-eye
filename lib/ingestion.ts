@@ -63,20 +63,33 @@ export async function backfillHistoricalChunk(daysPerChunk = 7) {
   const now = new Date();
   const today = utcDateOnly(now);
   const defaultCursor = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const configuredTarget = process.env.HISTORICAL_BACKFILL_TARGET_START || "1970-01-01T00:00:00.000Z";
-  const parsedTarget = new Date(configuredTarget);
-  const defaultTarget = Number.isNaN(parsedTarget.getTime())
-    ? new Date("1970-01-01T00:00:00.000Z")
+  const configuredTargetRaw =
+    process.env.HISTORICAL_TARGET_START ??
+    process.env.HISTORICAL_BACKFILL_TARGET_START ??
+    "2000-01-01T00:00:00.000Z";
+  const parsedTarget = new Date(configuredTargetRaw);
+  const configuredTarget = Number.isNaN(parsedTarget.getTime())
+    ? new Date("2000-01-01T00:00:00.000Z")
     : utcDateOnly(parsedTarget);
 
   const existing = await (await import("./persistence")).getHistoricalBackfillState();
-  if (existing?.complete) {
+  const existingTarget = existing ? new Date(existing.targetStart) : null;
+  if (
+    existing?.complete &&
+    existingTarget &&
+    !Number.isNaN(existingTarget.getTime()) &&
+    existingTarget.getTime() <= configuredTarget.getTime()
+  ) {
     return { ...existing, gamesAdded: 0, errors: [] as Array<{ league: string; message: string }> };
   }
 
   const cursorEnd = existing ? new Date(existing.cursorEnd) : defaultCursor;
-  const storedTarget = existing ? new Date(existing.targetStart) : configuredTarget;
-  const targetStart = storedTarget.getTime() > configuredTarget.getTime() ? configuredTarget : storedTarget;
+  const storedTarget = existingTarget && !Number.isNaN(existingTarget.getTime())
+    ? existingTarget
+    : configuredTarget;
+  const targetStart = storedTarget.getTime() > configuredTarget.getTime()
+    ? configuredTarget
+    : storedTarget;
   const candidateStart = new Date(cursorEnd.getTime() - (Math.max(1, daysPerChunk) - 1) * 24 * 60 * 60 * 1000);
   const chunkStart = candidateStart < targetStart ? targetStart : candidateStart;
 
