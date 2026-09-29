@@ -56,7 +56,11 @@ export async function backfillHistoricalChunk(daysPerChunk = 7) {
   const now = new Date();
   const today = utcDateOnly(now);
   const defaultCursor = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const defaultTarget = new Date(today.getTime() - 400 * 24 * 60 * 60 * 1000);
+  const configuredTarget = process.env.HISTORICAL_BACKFILL_TARGET_START || "1970-01-01T00:00:00.000Z";
+  const parsedTarget = new Date(configuredTarget);
+  const defaultTarget = Number.isNaN(parsedTarget.getTime())
+    ? new Date("1970-01-01T00:00:00.000Z")
+    : utcDateOnly(parsedTarget);
 
   const existing = await (await import("./persistence")).getHistoricalBackfillState();
   if (existing?.complete) {
