@@ -1015,7 +1015,10 @@ export async function upsertReferenceData(
 
 export async function getKnowledgeCounts() {
   const db = pool();
-  if (!db) return { teams: 0, players: 0, rosterSnapshots: 0, injuries: 0, transactions: 0, contextSnapshots: 0 };
+  if (!db) return {
+    teams: 0, players: 0, rosterSnapshots: 0, injuries: 0, transactions: 0,
+    contextSnapshots: 0, featureSnapshots: 0, gamePackages: 0
+  };
   await ensureSchema();
   const result = await db.query(`
     SELECT
@@ -1024,7 +1027,9 @@ export async function getKnowledgeCounts() {
       (SELECT COUNT(*)::int FROM roster_snapshots) AS roster_snapshots,
       (SELECT COUNT(*)::int FROM injuries) AS injuries,
       (SELECT COUNT(*)::int FROM transactions) AS transactions,
-      (SELECT COUNT(*)::int FROM game_context_snapshots) AS context_snapshots
+      (SELECT COUNT(*)::int FROM game_context_snapshots) AS context_snapshots,
+      (SELECT COUNT(*)::int FROM feature_snapshots) AS feature_snapshots,
+      (SELECT COUNT(*)::int FROM game_packages) AS game_packages
   `);
   const row = result.rows[0] ?? {};
   return {
@@ -1033,7 +1038,9 @@ export async function getKnowledgeCounts() {
     rosterSnapshots: Number(row.roster_snapshots ?? 0),
     injuries: Number(row.injuries ?? 0),
     transactions: Number(row.transactions ?? 0),
-    contextSnapshots: Number(row.context_snapshots ?? 0)
+    contextSnapshots: Number(row.context_snapshots ?? 0),
+    featureSnapshots: Number(row.feature_snapshots ?? 0),
+    gamePackages: Number(row.game_packages ?? 0)
   };
 }
 
