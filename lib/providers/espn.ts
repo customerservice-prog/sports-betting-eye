@@ -2,10 +2,10 @@ import { League } from "../types";
 import { FeedGame } from "../persistence";
 
 const ROUTES: Record<League, { sport: string; league: string; params?: Record<string, string> }> = {
-  NFL: { sport: "football", league: "nfl" },
-  NBA: { sport: "basketball", league: "nba" },
-  MLB: { sport: "baseball", league: "mlb" },
-  NHL: { sport: "hockey", league: "nhl" },
+  NFL: { sport: "football", league: "nfl", params: { limit: "1000" } },
+  NBA: { sport: "basketball", league: "nba", params: { limit: "1000" } },
+  MLB: { sport: "baseball", league: "mlb", params: { limit: "1000" } },
+  NHL: { sport: "hockey", league: "nhl", params: { limit: "1000" } },
   NCAAF: { sport: "football", league: "college-football", params: { groups: "80", limit: "500" } },
   NCAAB: { sport: "basketball", league: "mens-college-basketball", params: { limit: "1000" } }
 };
