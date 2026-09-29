@@ -1453,3 +1453,11 @@ button { color: inherit; }
   .coverage-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
   .coverage-card { min-height: 104px; padding: 11px; }
 }
+
+
+.archive-attribution {
+  margin: 12px 2px 0;
+  color: var(--muted-2);
+  font-size: 8px;
+  line-height: 1.5;
+}
