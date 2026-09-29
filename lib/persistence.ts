@@ -2,6 +2,7 @@ import { Pool, PoolClient } from "pg";
 import { createInitialPaperState, runExplorationBatch } from "./engine";
 import { PaperState } from "./types";
 import { applyEloResult, predictEloGame, type EloState } from "./modeling/elo";
+import { applyCompletedGame, createLeagueModelState, predictRealModels } from "./modeling/challengers";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -107,8 +108,52 @@ export async function ensureSchema(client?: PoolClient) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS feature_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+      snapshot_type TEXT NOT NULL DEFAULT 'pregame',
+      captured_at TIMESTAMPTZ NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(game_id, snapshot_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS model_backtests (
+      model_name TEXT NOT NULL,
+      model_version TEXT NOT NULL,
+      league TEXT NOT NULL,
+      sample_size INTEGER NOT NULL DEFAULT 0,
+      brier DOUBLE PRECISION,
+      log_loss DOUBLE PRECISION,
+      calibration_error DOUBLE PRECISION,
+      accuracy DOUBLE PRECISION,
+      evaluated_through TIMESTAMPTZ,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(model_name, model_version, league)
+    );
+
+    CREATE TABLE IF NOT EXISTS model_registry (
+      model_name TEXT NOT NULL,
+      model_version TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'challenger',
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      promoted_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(model_name, model_version)
+    );
+
+    INSERT INTO model_registry (model_name, model_version, role)
+    VALUES
+      ('elo-real-games', 'v1', 'baseline'),
+      ('recent-form', 'v1', 'challenger'),
+      ('sports-ensemble', 'v1', 'challenger')
+    ON CONFLICT (model_name, model_version) DO NOTHING;
+
     CREATE INDEX IF NOT EXISTS idx_games_starts_at ON games(starts_at);
     CREATE INDEX IF NOT EXISTS idx_predictions_game_id ON predictions(game_id);
+    CREATE INDEX IF NOT EXISTS idx_feature_snapshots_game_id ON feature_snapshots(game_id);
+    CREATE INDEX IF NOT EXISTS idx_model_backtests_model ON model_backtests(model_name, model_version);
     CREATE INDEX IF NOT EXISTS idx_exploration_batches_created_at ON exploration_batches(created_at);
   `);
 
